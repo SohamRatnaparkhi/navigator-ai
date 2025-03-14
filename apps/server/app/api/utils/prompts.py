@@ -1,89 +1,128 @@
 from typing import Dict, List, Optional
 
 from app.api.utils.dom_parser.dom_optimizer import generate_highlight_style_dom
+from app.api.utils.dom_parser.optimizer2 import generate_fixed_highlight_dom
+from app.api.utils.dom_parser.optimizer3 import generate_enhanced_highlight_dom
 from app.models.dom import DOMState
 
 def build_system_prompt():
-    prompt = """You are a helpful assistant that helps users interact with web pages.
+    prompt = """You are an AI browser named Navigator AI. You are an automation assistant designed to help users accomplish tasks on websites. Your goal is to accurately interact with web elements to complete the user's ultimate task.
+
+# INPUT INFORMATION
 You will receive:
-    1. A description of the user's task.
-    2. The current URL of the web page.
-    3. A concise description of interactive elements on the page with unique element IDs (E1, E2, etc.).
-    4. A history of actions that have been performed previously, including URLs visited and actions taken.
-Your task is to generate a JSON response containing a list of actions to perform to complete the user's task.
+1. The user's task description
+2. The current URL of the web page
+3. Interactive elements on the page with unique element IDs (E1, E2, etc.)
+4. History of previous actions (if any)
+5. Results of the last action (if any)
 
-IMPORTANT: Elements are identified by unique IDs in the format E1, E2, etc. These IDs map to the actual elements
-on the page. In your response, use these IDs to refer to elements you want to interact with.
+# ELEMENT INTERACTION RULES
+- Interactive elements are marked with IDs like [E1], [E2], etc.
+- ONLY elements with these IDs can be interacted with
+- The element description includes: tag type, key attributes, and visible text
+- Example: [E5]<input type=text placeholder="Search..."/>
 
-**ALWAYS** respond with valid JSON in this exact format:
+# RESPONSE FORMAT
+You MUST ALWAYS respond with valid JSON in this exact format:
 ```json
 {
-  \"current_state\": {
-        \"page_summary\": \"Quick detailed summary of new information from the current page which is not yet in the task history memory. Be specific with details which are important for the task. This is not on the meta level, but should be facts. If all the information is already in the task history memory, leave this empty.\",
-        \"evaluation_previous_goal\": \"Success|Failed|Unknown - Analyze the current elements and the image to check if the previous goals/actions are successful like intended by the task. Ignore the action result. The website is the ground truth. Also mention if something unexpected happened like new suggestions in an input field. Shortly state why/why not\",
-        \"next_goal\": \"What needs to be done with the next actions\"
-    },
-  \"actions\": [
+  "current_state": {
+    "page_summary": "Detailed summary of the current page focused on information relevant to the task. Be specific and factual.",
+    "evaluation_previous_goal": "Success|Failed|Unknown - Analyze if previous actions succeeded based on the current page state. Mention any unexpected behaviors (like suggestions appearing, redirects, etc.).",
+    "next_goal": "Specific immediate goal for the next action(s)"
+  },
+  "actions": [
     {
-      \"type\": \"ACTION_TYPE (click|input|scroll|url)\",
-      \"element_id\": \"E1\",  // Use element_id from the page description
-      \"text\": \"TEXT_TO_INPUT\",  // Only for 'input' actions
-      \"amount\": NUMBER,  // Only for 'scroll' actions (pixels)
-      \"url\": \"URL\"  // Only for 'url' actions
+      "type": "ACTION_TYPE (click|input|scroll|url)",
+      "element_id": "E5",  // Use EXACT element ID as shown in the page description
+      "text": "TEXT_TO_INPUT",  // Only for 'input' actions
+      "amount": NUMBER,  // Only for 'scroll' actions (pixels)
+      "url": "URL"  // Only for 'url' actions
     }
   ],
-  \"is_done\": true/false
+  "is_done": true/false  // Only true when the entire task is complete
 }"""
     return prompt
 
-
-def build_user_message(dom_state: DOMState, task: str = None, result: Optional[List[Dict]] = None, history: Optional[List[Dict]] = None):
-    # Create token-efficient DOM representation - this is the new approach
-    # dom_content, xpath_map, selector_map = generate_token_efficient_dom_for_llm(dom_state
-    # dom_content, xpath_map, selector_map = generate_complete_compact_dom(dom_state)
-    # dom_content, xpath_map, selector_map = generate_fixed_compact_dom(
-    #     dom_state)
-    # print('DOM content generated')
-    dom_content, xpath_map, selector_map = generate_highlight_style_dom(dom_state)
+def build_user_message(dom_state, task=None, history=None, result=None):
+    """
+    Build an optimized user message for LLM with highlight-style DOM representation.
+    
+    Args:
+        dom_state: The DOM state object
+        task: The user's task (optional)
+        history: Previous action history (optional)
+        result: Result of the last action (optional)
+        
+    Returns:
+        Tuple of (content, xpath_map, selector_map)
+    """
+    key_attributes = ['id', 'name', 'type', 'value', 'placeholder', 'href']
+    
+    dom_content, xpath_map, selector_map = generate_enhanced_highlight_dom(
+        dom_state, include_attributes=key_attributes)
+    
     content = ""
     
-    # Add task if provided
     if task:
-        content += f"Task: {task}\n\n"
+        content += f"MAIN TASK (END GOAL): {task}\n\n"
     
-    # Add current URL and DOM elements
-    content += f"""Current URL: {dom_state.url}
-
-{dom_content}
-"""
+    content += f"CURRENT URL: {dom_state.url}\n\n"
     
-    # Add history if provided
+    content += "INTERACTIVE ELEMENTS:\n"
+    content += "(Only elements with [E#] IDs can be interacted with)\n"
+    content += f"{dom_content}\n"
+    
     if history and len(history) > 0:
-        content += "\nPrevious actions:\n"
+        content += "\nACTION HISTORY:\n"
+        
         for i, step in enumerate(history):
+            if not isinstance(step, dict):
+                print(f"Warning: Invalid history step format: {type(step)}")
+                continue
+                
             content += f"Step {i+1}: URL: {step.get('url', 'unknown')}\n"
             actions = step.get('actions', [])
-            if actions:
-                for action in actions:
-                    content += f"  - {action.get('type', '').upper()}"
-                    if 'element_id' in action:
-                        content += f" element {action['element_id']}"
-                    elif 'xpath_ref' in action:
-                        content += f" element with ref: {action['xpath_ref']}"
-                    elif 'selector' in action:
-                        content += f" element with selector: {action['selector']}"
-                        
-                    if 'text' in action:
-                        content += f" with text: '{action['text']}'"
-                    if 'url' in action:
-                        content += f" to URL: {action['url']}"
-                    if 'amount' in action:
-                        content += f" by {action['amount']} pixels"
-                    content += "\n"
+            
+            if not actions:
+                print(f"Warning: No actions in history step {i+1}")
+                continue
+                
+            if not isinstance(actions, list):
+                print(f"Warning: Actions not a list in step {i+1}: {type(actions)}")
+                if isinstance(actions, dict):
+                    actions = [actions]
+                else:
+                    continue
+            
+            for action in actions:
+                if not isinstance(action, dict):
+                    print(f"Warning: Invalid action format in step {i+1}: {type(action)}")
+                    continue
+                    
+                action_str = f"  - {action.get('type', '').upper()}"
+                
+                if 'element_id' in action:
+                    action_str += f" element [{action['element_id']}]"
+                elif 'xpath_ref' in action and 'selector' in action:
+                    action_str += f" element with selector: {action['selector']}"
+                
+                if 'text' in action and action['text']:
+                    action_str += f" with text: '{action['text']}'"
+                if 'url' in action and action['url']:
+                    action_str += f" to URL: {action['url']}"
+                if 'amount' in action:
+                    action_str += f" by {action['amount']} pixels"
+                
+                content += action_str + "\n"
             content += "\n"
     
-    # Add current result if provided
     if result:
-        content += f"\nAction result: {result}"
+        content += f"RESULT OF LAST ACTION:\n{result}\n"
         
+    content += "\nREMINDERS:\n"
+    content += "- Use EXACT element IDs (E1, E2, etc.) as shown above\n"
+    content += "- For input actions, include both element_id and text\n"
+    content += "- Only set is_done:true when the entire task is complete\n"
+    
     return content, xpath_map, selector_map

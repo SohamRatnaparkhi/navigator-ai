@@ -8,6 +8,8 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 
+from openai import AsyncOpenAI, OpenAI
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -40,15 +42,11 @@ def parse_json_from_text(text):
     # Clean the text
     text = text.strip()
     
-    # Handle markdown code blocks
     if text.startswith("```json"):
-        # Remove opening markdown
         text = text[7:].strip()
     elif text.startswith("```"):
-        # Remove opening markdown
         text = text[3:].strip()
         
-    # Remove closing markdown
     if text.endswith("```"):
         text = text[:-3].strip()
     
@@ -56,7 +54,6 @@ def parse_json_from_text(text):
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        # If that fails, try to extract JSON using regex
         json_pattern = r'\{[\s\S]*\}'
         match = re.search(json_pattern, text)
         
@@ -67,7 +64,6 @@ def parse_json_from_text(text):
             except json.JSONDecodeError:
                 pass
     
-    # Return default structure if all parsing attempts fail
     return {
         "current_state": {
             "page_summary": "Failed to parse LLM output.",
@@ -172,13 +168,10 @@ def generate(user_prompt, system_prompt) -> GenerateResponse:
     print(response.text)
     print(response.usage_metadata)
     
-    # Process response to ensure it's valid JSON
     try:
-        # Try to parse the response text as JSON to validate it
         json_response = json.loads(response.text)
         return GenerateResponse.model_validate(json_response)
     except json.JSONDecodeError:
-        # If parsing fails, try to extract JSON
         print("Warning: LLM returned invalid JSON. Attempting to fix...")
         fixed_json = parse_json_from_text(response.text)
         return GenerateResponse.model_validate(fixed_json)
@@ -196,4 +189,68 @@ def generate(user_prompt, system_prompt) -> GenerateResponse:
         }
         return GenerateResponse.model_validate(fallback)
 
+
 # generate()
+# client = OpenAI(
+#     base_url="https://openrouter.ai/api/v1",
+#     api_key=os.environ.get("OPENROUTER_API_KEY"),
+# )
+def generate_with_open_router(user_prompt, system_prompt) -> GenerateResponse:
+    response = client.chat.completions.create(
+        model="deepseek/deepseek-r1:free",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        response_format={
+            "type": "json_object",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "current_state": {
+                        "type": "object",
+                        "properties": {
+                            "page_summary": {"type": "string"},
+                            "evaluation_previous_goal": {"type": "string"},
+                            "next_goal": {"type": "string"}
+                        },
+                        "required": ["page_summary", "evaluation_previous_goal", "next_goal"]
+                    },
+                    "actions": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {"type": "string"},
+                                "element_id": {"type": "string"},
+                                "xpath_ref": {"type": "string"},
+                                "selector": {"type": "string"},
+                                "text": {"type": "string"},
+                                "amount": {"type": "integer"},
+                                "url": {"type": "string"}
+                            },
+                            "required": ["type"]
+                        }
+                    },
+                    "is_done": {"type": "boolean"}
+                },
+                "required": ["current_state", "actions", "is_done"]
+            }
+        }
+    )
+    
+    try:
+        json_response = response.choices[0].message.content
+        return GenerateResponse.model_validate(json.loads(json_response))
+    except Exception as e:
+        print(f"Error processing response: {e}")
+        fallback = {
+            "current_state": {
+                "page_summary": "Error processing LLM response.",
+                "evaluation_previous_goal": "Unknown",
+                "next_goal": "Please try again"
+            },
+            "actions": [],
+            "is_done": False
+        }
+        return GenerateResponse.model_validate(fallback)

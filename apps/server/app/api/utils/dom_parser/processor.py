@@ -55,7 +55,6 @@ def parse_dom(html_content: str) -> DOMHashMap:
         dom_hash_map = {}
         current_id = 0
 
-        # Parse HTML with BeautifulSoup
         soup = BeautifulSoup(html_content, 'html.parser')
 
         def process_node(node, parent_id=None):
@@ -71,10 +70,8 @@ def parse_dom(html_content: str) -> DOMHashMap:
 
                 logger.debug(f"Processing node {node_id}, type: {type(node)}")
 
-                # Handle text nodes (NavigableString)
                 if isinstance(node, NavigableString):
                     text = node.strip()
-                    # Skip empty text nodes
                     if not text:
                         logger.debug("Skipping empty text node")
                         return -1
@@ -90,12 +87,10 @@ def parse_dom(html_content: str) -> DOMHashMap:
 
                     return node_id
 
-                # Handle element nodes (Tag)
                 if isinstance(node, Tag):
                     tag_name = node.name.lower()
                     logger.debug(f"Element node: <{tag_name}>")
 
-                    # Extract attributes
                     attributes = {}
                     try:
                         if node.attrs:
@@ -110,7 +105,6 @@ def parse_dom(html_content: str) -> DOMHashMap:
                         logger.error(
                             f"Error extracting attributes: {attr_error}")
 
-                    # Get XPath
                     xpath = ""
                     try:
                         xpath = get_xpath_for_element(node)
@@ -119,7 +113,6 @@ def parse_dom(html_content: str) -> DOMHashMap:
                         logger.error(f"Error generating XPath: {xpath_error}")
                         xpath = f"/{tag_name}"  # Fallback
 
-                    # Check element properties
                     is_interactive = is_interactive_element(node)
                     is_visible = is_element_visible(node)
                     is_top = is_top_element(node)
@@ -127,7 +120,6 @@ def parse_dom(html_content: str) -> DOMHashMap:
                     logger.debug(
                         f"Element properties - interactive: {is_interactive}, visible: {is_visible}, top: {is_top}")
 
-                    # Create the element node
                     element_node = DOMElementNode(
                         tagName=tag_name,
                         attributes=attributes,
@@ -140,7 +132,6 @@ def parse_dom(html_content: str) -> DOMHashMap:
 
                     dom_hash_map[str(node_id)] = element_node
 
-                    # Process children
                     try:
                         logger.debug(
                             f"Processing {len(list(node.children))} children for {tag_name}")

@@ -4,6 +4,7 @@ from bs4 import NavigableString, Tag
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger("DOM-Analyzer")
+logger.setLevel(logging.INFO)
 
 
 unaccepted_leaf_element_tags_set = {
@@ -29,8 +30,7 @@ def tag_wise_filter(element_tag: str) -> bool:
         return True
     except Exception as error:
         logger.error(f"Error in tag_wise_filter: {error}")
-        return False  # Fail safe - reject elements that cause errors
-
+        return True
 
 def is_element_visible(element: Tag) -> bool:
     """
@@ -45,16 +45,13 @@ def is_element_visible(element: Tag) -> bool:
         tag_name = element.name.lower() if element.name else ""
         logger.debug(f"Checking visibility for {tag_name}")
 
-        # Check style attribute for display:none or visibility:hidden
         style_attr = element.get('style', '')
         if 'display:none' in style_attr.lower() or 'visibility:hidden' in style_attr.lower():
             return False
 
-        # Check for common hidden attributes
         if element.get('hidden') is not None or element.get('aria-hidden') == 'true':
             return False
 
-        # Check class names for common patterns indicating hidden elements
         class_attr = element.get('class', [])
         class_names = class_attr if isinstance(
             class_attr, list) else str(class_attr).split()
@@ -66,8 +63,7 @@ def is_element_visible(element: Tag) -> bool:
         return True
     except Exception as error:
         logger.error(f"Error in is_element_visible: {error}")
-        return False  # Fail safe - consider problematic elements as not visible
-
+        return True
 
 def is_top_element(element: Tag) -> bool:
     """
@@ -82,11 +78,9 @@ def is_top_element(element: Tag) -> bool:
         tag_name = element.name.lower() if element.name else ""
         logger.debug(f"Checking if {tag_name} is top element")
 
-        # Check for elements that are likely to be overlaid by others
         if tag_name in ['body', 'html']:
             return False
 
-        # Check for background elements
         style_attr = element.get('style', '').lower()
         if 'z-index:-' in style_attr or 'z-index: -' in style_attr:
             return False
@@ -94,8 +88,7 @@ def is_top_element(element: Tag) -> bool:
         return True
     except Exception as error:
         logger.error(f"Error in is_top_element: {error}")
-        return True  # Default to visible in case of errors
-
+        return True
 
 def is_text_node_visible(text_node: NavigableString) -> bool:
     """Check if a text node is likely visible."""
@@ -106,7 +99,6 @@ def is_text_node_visible(text_node: NavigableString) -> bool:
 
         logger.debug("Checking text node visibility")
 
-        # Check if parent element is visible
         parent = text_node.parent
         if not parent or not is_element_visible(parent):
             return False
@@ -114,8 +106,7 @@ def is_text_node_visible(text_node: NavigableString) -> bool:
         return True
     except Exception as error:
         logger.error(f"Error in is_text_node_visible: {error}")
-        return False  # Fail safe - consider problematic text nodes as not visible
-
+        return True
 
 def is_interactive_element(element: Tag) -> bool:
     """Check if an element is interactive based on its tag and attributes."""
@@ -127,12 +118,10 @@ def is_interactive_element(element: Tag) -> bool:
         tag_name = element.name.lower() if element.name else ""
         logger.debug(f"Checking if {tag_name} is interactive")
 
-        # Immediately return false for body tag
         if tag_name == "body":
             logger.debug("Body tag is not interactive")
             return False
 
-        # Base interactive elements and roles
         interactive_elements = {
             "a", "button", "details", "embed", "input", "label",
             "menu", "menuitem", "object", "select", "textarea", "summary"
@@ -152,13 +141,11 @@ def is_interactive_element(element: Tag) -> bool:
         aria_role = element.get('aria-role', '')
         tab_index = element.get('tabindex')
 
-        # Check for specific class
         classes = element.get('class', [])
         class_list = classes if isinstance(
             classes, list) else str(classes).split()
         has_address_input_class = "address-input__container__input" in class_list
 
-        # Basic role/attribute checks
         parent_tag = element.parent.name.lower(
         ) if element.parent and element.parent.name else ""
         has_interactive_role = (
@@ -175,7 +162,6 @@ def is_interactive_element(element: Tag) -> bool:
             logger.debug(f"Element has interactive role: {tag_name}")
             return True
 
-        # Check for event listeners
         has_click_handler = (
             element.get('onclick') is not None or
             element.has_attr('ng-click') or
@@ -183,7 +169,6 @@ def is_interactive_element(element: Tag) -> bool:
             element.has_attr('v-on:click')
         )
 
-        # Check for ARIA properties that suggest interactivity
         has_aria_props = (
             element.has_attr('aria-expanded') or
             element.has_attr('aria-pressed') or
@@ -191,10 +176,8 @@ def is_interactive_element(element: Tag) -> bool:
             element.has_attr('aria-checked')
         )
 
-        # Check if element is draggable
         is_draggable = element.get('draggable') == "true"
 
-        # Additional check to prevent body from being marked as interactive
         if tag_name == "body" or parent_tag == "body":
             logger.debug(
                 "Element is body or direct child of body - not interactive")
@@ -211,4 +194,4 @@ def is_interactive_element(element: Tag) -> bool:
         return is_interactive
     except Exception as error:
         logger.error(f"Error in is_interactive_element: {error}")
-        return False  # Fail safe - consider problematic elements as not interactive
+        return True

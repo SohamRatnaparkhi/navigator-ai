@@ -8,14 +8,12 @@ let monitoringInterval: NodeJS.Timeout | null = null;
 let currentIterations = 0;
 let isPaused = false;
 
-// Store the most recent server update response to avoid message passing issues
 let lastUpdateResponse: { 
     timestamp: string; 
     task_id: string; 
     data: any;
 } | null = null;
 
-// Store active task session
 let activeSession: {
     taskId: string;
     status: 'active' | 'completed' | 'error' | 'paused';
@@ -23,7 +21,6 @@ let activeSession: {
     isRunning?: boolean;
 } | null = null;
 
-// Initialize session from storage on extension load
 chrome.storage.local.get(['activeSession'], (result) => {
     console.log('Loaded active session from storage:', result.activeSession);
     if (result.activeSession) {
@@ -32,7 +29,6 @@ chrome.storage.local.get(['activeSession'], (result) => {
     }
 });
 
-// Helper function to check if a URL is accessible by content scripts
 function isValidUrl(url: string): boolean {
     return typeof url === 'string' &&
         !url.startsWith('chrome://') &&
@@ -43,20 +39,17 @@ function isValidUrl(url: string): boolean {
         !url.startsWith('brave://');
 }
 
-// Handle extension icon click - toggle sidebar
 chrome.action.onClicked.addListener((tab) => {
     console.log('Extension icon clicked, toggling sidebar in tab:', tab.id);
     if (tab.id && tab.url && isValidUrl(tab.url)) {
         chrome.tabs.sendMessage(tab.id, { type: 'toggleSidebar' })
             .catch(err => {
                 console.error('Error sending toggleSidebar message:', err);
-                // Try injecting content script if it's not loaded
                 chrome.scripting.executeScript({
                     target: { tabId: tab.id! },
                     files: ['content.js']
                 })
                     .then(() => {
-                        // Now try sending the message again
                         chrome.tabs.sendMessage(tab.id!, { type: 'toggleSidebar' });
                     })
                     .catch(injectErr => {
@@ -74,7 +67,7 @@ chrome.runtime.onMessage.addListener(async (message: Message, sender, sendRespon
     try {
         if (message.type === 'startTask') {
             await handleStartTask(message, sendResponse);
-            return true; // Keep channel open for async response
+            return true; 
         } else if (message.type === 'startMonitoring') {
             startMonitoring(message.task_id!);
             sendResponse({ success: true });
@@ -90,10 +83,23 @@ chrome.runtime.onMessage.addListener(async (message: Message, sender, sendRespon
             console.log('Reset iterations counter to 0');
             sendResponse({ success: true });
         } else if (message.type === 'check_processing_status') {
-            // Check if the task is marked as completed
-            const taskStatus = await chrome.storage.local.get(['activeSession']);
-            const isDone = taskStatus.activeSession?.status === 'completed';
-            console.log('Checking processing status, isDone:', isDone);
+            // Check if the task is marked as completed by checking multiple sources
+            const storageData = await chrome.storage.local.get(['activeSession', 'taskState', 'lastUpdateResponse']);
+            
+            // Check multiple completion indicators
+            const sessionDone = storageData.activeSession?.status === 'completed';
+            const lastUpdateDone = storageData.lastUpdateResponse?.data?.result?.is_done === true;
+            const processingDone = storageData.taskState?.processingStatus === 'completed';
+            
+            // If ANY of these indicate completion, consider the workflow done
+            const isDone = sessionDone || lastUpdateDone || processingDone;
+            
+            console.log('Checking processing status, isDone:', isDone, {
+                sessionDone,
+                lastUpdateDone,
+                processingDone
+            });
+            
             sendResponse({ isDone });
         } else if (message.type === 'toggleSidebar') {
             // Find the active tab and send toggle message
@@ -123,6 +129,14 @@ chrome.runtime.onMessage.addListener(async (message: Message, sender, sendRespon
             // Handle processing status updates from content script
             await updateProcessingStatus(message.task_id, message.status as ProcessingStatus);
             sendResponse({ success: true });
+        } else if (message.type === 'resetWorkflow') {
+            // Reset the entire workflow
+            await resetWorkflow();
+            sendResponse({ success: true });
+        } else if (message.type === 'checkDomainChange' && message.currentUrl) {
+            // Check if domain has changed and if so, stop monitoring
+            const domainChanged = await checkDomainChange(message.currentUrl);
+            sendResponse({ success: true, domainChanged });
         }
     } catch (error) {
         console.error('Error in background script:', error);
@@ -177,7 +191,6 @@ async function handleDOMUpdate(message: Message) {
             structure: message.dom_data.structure ?? {}
         };
 
-        // Step 1: Store that we're starting a server update
         await chrome.storage.local.set({
             currentDOMUpdate: {
                 task_id: message.task_id,
@@ -209,7 +222,6 @@ async function handleDOMUpdate(message: Message) {
             data = await response.json();
             console.log('DOM update successful:', data);
             
-            // Store the response for later querying
             lastUpdateResponse = {
                 timestamp: new Date().toISOString(),
                 task_id: message.task_id,
@@ -258,6 +270,16 @@ async function handleDOMUpdate(message: Message) {
             console.log('Task marked as done by the server, stopping monitoring');
             activeSession.status = 'completed';
             await chrome.storage.local.set({ activeSession });
+            
+            // Explicitly broadcast completion status
+            await updateProcessingStatus(message.task_id, 'completed');
+            chrome.runtime.sendMessage({
+                type: 'processingStatusUpdate',
+                task_id: message.task_id,
+                status: 'completed',
+                isDone: true
+            }).catch(err => console.error('Error broadcasting completion status:', err));
+            
             stopMonitoring();
         }
 
@@ -291,7 +313,6 @@ async function handleStartTask(message: Message, sendResponse: (response?: any) 
     try {
         console.log('Starting task:', message.task);
 
-        // If there's an active session, use that task ID
         if (activeSession?.taskId && activeSession.status === 'active') {
             console.log('Using existing active session:', activeSession.taskId);
             sendResponse({ task_id: activeSession.taskId });
@@ -336,14 +357,11 @@ async function startMonitoring(task_id: string) {
         monitoringInterval = null;
     }
 
-    // Reset iterations counter when starting workflow
     currentIterations = 0;
     isPaused = false;
     
-    // Store a flag to indicate if DOM update is in progress
     let isUpdateInProgress = false;
 
-    // Simple function to process one iteration
     const processOneIteration = async () => {
         if (isPaused) {
             console.log('Monitoring is paused, skipping iteration');
@@ -369,7 +387,6 @@ async function startMonitoring(task_id: string) {
             
             const tabId = tabs[0].id;
             
-            // Make sure content script is loaded
             try {
                 await chrome.tabs.sendMessage(tabId, { type: 'ping' });
             } catch (error) {
@@ -380,7 +397,6 @@ async function startMonitoring(task_id: string) {
                 });
             }
             
-            // Use startSequentialProcessing in content script - this will handle a single iteration
             const response = await new Promise<any>((resolve) => {
                 chrome.tabs.sendMessage(tabId, {
                     type: 'singleDOMProcess',
@@ -515,4 +531,130 @@ function resumeMonitoring() {
         type: 'pauseStateChanged',
         isPaused: false
     });
+}
+
+// Function to reset the entire workflow
+async function resetWorkflow() {
+    console.log('Resetting entire workflow');
+    
+    // Stop any ongoing monitoring
+    stopMonitoring();
+    
+    // Reset iteration counter
+    currentIterations = 0;
+    
+    // Reset active session
+    activeSession = null;
+    
+    // Clear all stored data
+    await chrome.storage.local.set({
+        activeSession: null,
+        taskState: null,
+        currentDOMUpdate: null,
+        lastUpdateResponse: null
+    });
+    
+    // Notify content script and UI about reset
+    chrome.runtime.sendMessage({
+        type: 'workflowReset'
+    }).catch(err => console.error('Error broadcasting workflow reset:', err));
+    
+    // Get active tab to inform content script
+    try {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tabs.length > 0 && tabs[0].id && tabs[0].url && isValidUrl(tabs[0].url)) {
+            await chrome.tabs.sendMessage(tabs[0].id, { type: 'workflowReset' })
+                .catch(err => console.error('Error sending reset to content script:', err));
+        }
+    } catch (error) {
+        console.error('Error communicating reset to content script:', error);
+    }
+    
+    console.log('Workflow reset complete');
+}
+
+// Function to check if domain has changed
+async function checkDomainChange(currentUrl: string): Promise<boolean> {
+    try {
+        // Extract domain from URL
+        const getDomain = (url: string) => {
+            try {
+                const urlObj = new URL(url);
+                return urlObj.hostname;
+            } catch (error) {
+                console.error('Error parsing URL:', error);
+                return url; // Return original string if parsing fails
+            }
+        };
+        
+        // Get last processed URL from storage
+        const result = await chrome.storage.local.get(['taskState']);
+        const lastProcessedUrl = result.taskState?.lastProcessedUrl || '';
+        
+        // No previous URL, store current and return false
+        if (!lastProcessedUrl) {
+            if (result.taskState) {
+                await chrome.storage.local.set({
+                    taskState: {
+                        ...result.taskState,
+                        lastProcessedUrl: currentUrl
+                    }
+                });
+            } else {
+                // Create new taskState if it doesn't exist
+                await chrome.storage.local.set({
+                    taskState: {
+                        processingStatus: 'idle',
+                        lastUpdateTimestamp: new Date().toISOString(),
+                        lastProcessedUrl: currentUrl
+                    }
+                });
+            }
+            return false;
+        }
+        
+        // Compare domains
+        const currentDomain = getDomain(currentUrl);
+        const lastDomain = getDomain(lastProcessedUrl);
+        const domainChanged = currentDomain !== lastDomain;
+        
+        console.log('Domain check:', { currentDomain, lastDomain, domainChanged });
+        
+        // Always update the URL regardless of domain change
+        if (result.taskState) {
+            await chrome.storage.local.set({
+                taskState: {
+                    ...result.taskState,
+                    lastProcessedUrl: currentUrl
+                }
+            });
+        } else {
+            // Create new taskState if it doesn't exist
+            await chrome.storage.local.set({
+                taskState: {
+                    processingStatus: 'idle',
+                    lastUpdateTimestamp: new Date().toISOString(),
+                    lastProcessedUrl: currentUrl
+                }
+            });
+        }
+        
+        // If domain changed and we have an active session, stop monitoring
+        if (domainChanged && activeSession) {
+            console.log('Domain changed, stopping workflow');
+            
+            // Mark session as completed due to domain change
+            activeSession.status = 'completed';
+            await chrome.storage.local.set({ activeSession });
+            
+            // Stop monitoring
+            stopMonitoring();
+        }
+        
+        return domainChanged;
+    } catch (error) {
+        console.error('Error in checkDomainChange:', error);
+        // Default to false on any error
+        return false;
+    }
 }

@@ -1,7 +1,6 @@
 import { DOMElementNode, DOMHashMap } from "../types";
 import { isElementVisible, isInteractiveElement, isTextNodeVisible, isTopElement } from "../utils/filters";
 
-// Logger helper (can be replaced with your actual logging system)
 const logger = {
     debug: (message: string, ...data: any[]) => console.debug(`[DOM-Analyzer] ${message}`, ...data),
     error: (message: string, error?: any) => console.error(`[DOM-Analyzer] ${message}`, error)

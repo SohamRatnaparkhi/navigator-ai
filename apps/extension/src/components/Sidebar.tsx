@@ -70,6 +70,16 @@ export default function Sidebar() {
                     isPaused: message.isPaused || false,
                     status: message.isPaused ? 'paused' : 'running'
                 }));
+            } else if (message.type === 'workflowReset') {
+                // Reset the state completely when workflow reset is received
+                setState({
+                    taskId: null,
+                    status: 'idle',
+                    task: '',
+                    isRunning: false,
+                    isPaused: false,
+                    iterations: 0
+                });
             }
         };
 
@@ -188,6 +198,33 @@ export default function Sidebar() {
             chrome.runtime.sendMessage({ type: 'resumeMonitoring' });
         } catch (error) {
             console.error('Error resuming task:', error);
+        }
+    };
+    
+    const handleResetWorkflow = async () => {
+        try {
+            console.log('Resetting workflow...');
+            
+            // Call the background script to reset the workflow
+            await chrome.runtime.sendMessage({ type: 'resetWorkflow' });
+            
+            // Update local state
+            const newState: TaskState = {
+                taskId: null,
+                status: 'idle',
+                task: '',
+                isRunning: false,
+                isPaused: false,
+                iterations: 0
+            };
+            
+            setState(newState);
+            
+            // Show confirmation to user
+            alert('Workflow has been reset successfully.');
+        } catch (error) {
+            console.error('Error resetting workflow:', error);
+            alert('Failed to reset workflow. Please try again.');
         }
     };
 
@@ -383,6 +420,21 @@ export default function Sidebar() {
                                         </button>
                                     </div>
                                 )}
+                            </div>
+                                
+                            {/* Reset Workflow Button */}
+                            <div className="mt-3">
+                                <button
+                                    onClick={handleResetWorkflow}
+                                    className="w-full px-4 py-2 text-white bg-slate-600/90 hover:bg-slate-700/90 rounded-md shadow-sm font-medium focus:outline-none focus:ring-2 focus:ring-slate-500 transition-colors text-sm"
+                                >
+                                    <div className="flex items-center justify-center gap-2">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                            <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                                        </svg>
+                                        Reset Workflow
+                                    </div>
+                                </button>
                             </div>
 
                             {/* Status Panel */}
