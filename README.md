@@ -12,10 +12,10 @@
 
 ## Overview
 
-Navigator AI empowers users and developers to seamlessly automate tasks within web browsers (with app support coming in the future). Unlike traditional browser automation tools, Navigator AI offers:
+Navigator AI empowers users and developers to seamlessly automate tasks within web browsers (with app support coming in the future). Unlike traditional browser automation tools, Navigator AI will offer:
 
 - A **component library** for direct integration into web applications
-- A **browser extension** for end-user automation
+- A **browser extension** for automating tasks in your browser
 
 Consider it as Cursor/Windsurf for websites and applications. Big shoutout to [Browser-Use](https://github.com/browser-use/browser-use) as Navigator AI is inspired by them and currently is a kind of Chrome extension version that does what they do inside but inside YOUR browser while you retain full control to pause, stop, or restart.
 
