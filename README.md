@@ -17,7 +17,7 @@ Navigator AI empowers users and developers to seamlessly automate tasks within w
 - A **component library** for direct integration into web applications
 - A **browser extension** for end-user automation
 
-Consider it as Cursor/Windsurf for websites and applications. Big shoutout to [Browser-Use](https://github.com/browser-use/browser-use) as Navigator AI is inspired by them and currently is a kind of Chrome extension version that does what they do inside but inside YOUR browser.
+Consider it as Cursor/Windsurf for websites and applications. Big shoutout to [Browser-Use](https://github.com/browser-use/browser-use) as Navigator AI is inspired by them and currently is a kind of Chrome extension version that does what they do inside but inside YOUR browser while you retain full control to pause, stop, or restart.
 
 ⭐️ **P.s. Drop a star if you want a completely FREE and open-source alternative to Manus AI. I aim to make Navigator AI on par with Manus AI. Your support will motivate me a lot. Thank you!**
 
@@ -26,7 +26,7 @@ Consider it as Cursor/Windsurf for websites and applications. Big shoutout to [B
 - **Direct Web Integration**: Embeddable React/framework components allow developers to add browser automation capabilities directly within their web/mobile applications. Users can easily use voice/text to automatically execute workflows on your app.
 - **User-Friendly Extension**: A browser extension that allows users to create, manage, and run repeatable workflows directly in their browser.
 - **Knowledge Base Integration**: Add custom rules, documentation, and knowledge bases that the agent will prioritize over its LLM-based workflow, making the agent specific to YOUR application.
-- **Self-Improvement**: The agent improves over time based on how users interact with pages, even when not actively using the agent.
+- **Self-Improvement**: The agent improves over time based on how you interact with different pages, especially when not actively using the agent.
 
 ## Technology Stack
 
