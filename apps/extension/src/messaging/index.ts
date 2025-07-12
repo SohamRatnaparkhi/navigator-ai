@@ -133,6 +133,12 @@ export function initializeMessageListener(): void {
             sendResponse({ success: true });
             return true;
         }
+        else if (message.type === 'stopAutomation') {
+            clearAllHighlights();
+            // Any other cleanup needed in content script
+            sendResponse({ success: true });
+            return true;
+        }
 
         // If we reach here, it was an unknown message type
         return false;
