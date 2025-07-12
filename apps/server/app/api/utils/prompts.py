@@ -1,9 +1,4 @@
-from typing import Dict, List, Optional
-
-from app.api.utils.dom_parser.dom_optimizer import generate_highlight_style_dom
-from app.api.utils.dom_parser.optimizer2 import generate_fixed_highlight_dom
 from app.api.utils.dom_parser.optimizer3 import generate_enhanced_highlight_dom
-from app.models.dom import DOMState
 
 def build_system_prompt():
     prompt = """You are an AI browser named Navigator AI. You are an automation assistant designed to help users accomplish tasks on websites. Your goal is to accurately interact with web elements to complete the user's ultimate task.
