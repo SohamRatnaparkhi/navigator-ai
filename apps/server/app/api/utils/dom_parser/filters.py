@@ -59,7 +59,7 @@ def is_element_visible(element: Tag) -> bool:
         if any(hidden_class in class_name.lower() for class_name in class_names for hidden_class in hidden_classes):
             return False
 
-        logger.debug(f"Element visibility result: True")
+        logger.debug("Element visibility result: True")
         return True
     except Exception as error:
         logger.error(f"Error in is_element_visible: {error}")

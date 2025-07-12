@@ -21,7 +21,7 @@ export interface DOMUpdate {
 }
 
 export interface Message {
-    type: 'startTask' | 'startMonitoring' | 'stopMonitoring' | 'processDOM' | 'toggleSidebar' | 'toggleUI' | 'updateSidebarState' | 'dom_update' | 'pauseMonitoring' | 'resumeMonitoring' | 'executeActions' | 'startSequentialProcessing' | 'check_processing_status' | 'resetIterations' | 'singleDOMProcess' | 'ping' | 'resetWorkflow' | 'checkDomainChange' | 'updateProcessingStatus' | 'openSidePanel' | 'closeSidePanel' | 'toggleSidePanel' | 'switchTab';
+    type: 'startTask' | 'startMonitoring' | 'stopMonitoring' | 'processDOM' | 'toggleSidebar' | 'toggleUI' | 'updateSidebarState' | 'dom_update' | 'pauseMonitoring' | 'resumeMonitoring' | 'executeActions' | 'startSequentialProcessing' | 'check_processing_status' | 'resetIterations' | 'singleDOMProcess' | 'ping' | 'resetWorkflow' | 'checkDomainChange' | 'updateProcessingStatus' | 'openSidePanel' | 'closeSidePanel' | 'toggleSidePanel' | 'switchTab' | 'processingStatusUpdate' | 'invalidURL' | 'stopAutomation';
     task?: string;
     task_id?: string;
     dom_data?: FrontendDOMState;
@@ -47,11 +47,12 @@ export type ProcessingStatus =
     'waiting_for_server' | // Waiting for server response
     'completed' |         // Task completed
     'error' |             // Error occurred
-    'paused';             // Processing paused
+    'paused' |            // Processing paused
+    'stopping';          // Processing stopping
 
 export interface TaskState {
     taskId: string | null;
-    status: 'idle' | 'running' | 'completed' | 'error' | 'paused';
+    status: 'idle' | 'running' | 'completed' | 'error' | 'paused' | 'stopping';
     task: string;
     isRunning: boolean;
     iterations: number;

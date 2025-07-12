@@ -15,11 +15,11 @@ export default function Sidebar() {
         isPaused: false,
         iterations: 0
     });
+    const [serverURL, setServerURL] = useState('http://localhost:8000');
 
     useEffect(() => {
         console.log('Sidebar component mounted');
         
-        // Check if running in Chrome with sidePanel support
         const checkChromeSupport = () => {
             return typeof chrome !== 'undefined' && 
                   !!chrome.sidePanel && 
@@ -28,14 +28,13 @@ export default function Sidebar() {
         
         setIsChromeWithSidePanel(checkChromeSupport());
 
-        chrome.storage.local.get(['taskState', 'sidebarOpen', 'activeTab', 'activeSession', 'sidePanelState'], (result) => {
+        chrome.storage.local.get(['taskState', 'sidebarOpen', 'activeTab', 'activeSession', 'sidePanelState', 'serverURL'], (result) => {
             console.log('Loaded from storage:', result);
 
             if (result.taskState) {
                 setState(result.taskState);
             }
 
-            // For Chrome with sidePanel, use sidePanelState; otherwise use sidebarOpen
             if (checkChromeSupport()) {
                 setIsOpen(result.sidePanelState === 'open');
             } else if (result.sidebarOpen !== undefined) {
@@ -56,9 +55,13 @@ export default function Sidebar() {
                     isPaused: result.activeSession.isPaused || false
                 }));
             }
+
+            if (result.serverURL) {
+                setServerURL(result.serverURL);
+            }
         });
 
-        const messageListener = (message: { type: string; iterations?: number; stopMonitoring?: boolean; pauseStateChanged?: boolean; isPaused?: boolean; status?: string }) => {
+        const messageListener = (message: { type: string; iterations?: number; stopMonitoring?: boolean; pauseStateChanged?: boolean; isPaused?: boolean; status?: TaskState['status'] }) => {
             if (message.type === 'iterationUpdate') {
                 setState(prev => ({
                     ...prev,
@@ -67,17 +70,9 @@ export default function Sidebar() {
             } else if (message.type === 'stopMonitoring') {
                 setState(prev => ({
                     ...prev,
-                    status: 'completed',
+                    status: message.status || 'idle',
                     isRunning: false
                 }));
-
-                chrome.storage.local.set({
-                    taskState: {
-                        ...state,
-                        status: 'completed',
-                        isRunning: false
-                    }
-                }).catch(err => console.error('Error saving completed state:', err));
             } else if (message.type === 'pauseStateChanged') {
                 setState(prev => ({
                     ...prev,
@@ -85,7 +80,6 @@ export default function Sidebar() {
                     status: message.isPaused ? 'paused' : 'running'
                 }));
             } else if (message.type === 'workflowReset') {
-                // Reset the state completely when workflow reset is received
                 setState({
                     taskId: null,
                     status: 'idle',
@@ -94,6 +88,10 @@ export default function Sidebar() {
                     isPaused: false,
                     iterations: 0
                 });
+            } else if (message.type === 'invalidURL') {
+                console.warn('Cannot run automation on this page (chrome:// or similar URLs)');
+                setState(prev => ({ ...prev, status: 'error' }));
+                window.location.reload();
             }
         };
 
@@ -107,7 +105,6 @@ export default function Sidebar() {
     }, []);
 
     useEffect(() => {
-        // Use appropriate state storage based on browser
         if (isChromeWithSidePanel) {
             chrome.storage.local.set({ sidePanelState: isOpen ? 'open' : 'closed' });
         } else {
@@ -159,7 +156,6 @@ export default function Sidebar() {
                 await chrome.storage.local.set({ taskState: newState });
                 setState(newState);
 
-                // Start monitoring
                 chrome.runtime.sendMessage({ type: 'startMonitoring', task_id: response.task_id });
             }
         } catch (error) {
@@ -171,20 +167,11 @@ export default function Sidebar() {
     const handleStopTask = async () => {
         try {
             console.log('Stopping task...');
-            setState(prev => ({ ...prev, status: 'idle' }));
-            chrome.runtime.sendMessage({ type: 'stopMonitoring' });
-
-            const newState: TaskState = {
-                ...state,
-                status: 'idle',
-                isRunning: false,
-                isPaused: false
-            };
-
-            await chrome.storage.local.set({ taskState: newState });
-            setState(newState);
+            setState(prev => ({ ...prev, status: 'stopping', isRunning: false }));
+            await chrome.runtime.sendMessage({ type: 'stopMonitoring' });
         } catch (error) {
             console.error('Error stopping task:', error);
+            setState(prev => ({ ...prev, status: 'error' }));
         }
     };
 
@@ -226,10 +213,8 @@ export default function Sidebar() {
         try {
             console.log('Resetting workflow...');
             
-            // Call the background script to reset the workflow
             await chrome.runtime.sendMessage({ type: 'resetWorkflow' });
             
-            // Update local state
             const newState: TaskState = {
                 taskId: null,
                 status: 'idle',
@@ -241,7 +226,6 @@ export default function Sidebar() {
             
             setState(newState);
             
-            // Show confirmation to user
             alert('Workflow has been reset successfully.');
         } catch (error) {
             console.error('Error resetting workflow:', error);
@@ -256,6 +240,7 @@ export default function Sidebar() {
             case 'idle': return 'bg-yellow-500';
             case 'completed': return 'bg-blue-500';
             case 'paused': return 'bg-orange-500';
+            case 'stopping': return 'bg-purple-500';
             default: return 'bg-gray-400';
         }
     };
@@ -267,44 +252,35 @@ export default function Sidebar() {
             case 'idle': return 'Idle';
             case 'completed': return 'Completed';
             case 'paused': return 'Paused';
+            case 'stopping': return 'Stopping';
             default: return 'Idle';
         }
     };
 
-    // Handle opening the sidebar/panel
     const handleOpen = () => {
         if (isChromeWithSidePanel) {
-            // For Chrome with sidePanel, directly use the API
             chrome.sidePanel.setOptions({ enabled: true });
             
-            // Try to get the current tab ID to open the panel in
             chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
                 if (tabs[0] && tabs[0].id) {
                     chrome.sidePanel.open({ tabId: tabs[0].id });
                 } else {
-                    // Fallback to current window
                     chrome.sidePanel.open({ windowId: chrome.windows.WINDOW_ID_CURRENT });
                 }
             });
             
-            // Also update storage to maintain state
             chrome.storage.local.set({ sidePanelState: 'open' });
         }
         
-        // Always update local state
         setIsOpen(true);
     };
 
-    // Handle closing the sidebar/panel
     const handleClose = () => {
         if (isChromeWithSidePanel) {
-            // For Chrome with sidePanel, directly use the API
             chrome.sidePanel.setOptions({ enabled: false });
-            // Also update storage to maintain state
             chrome.storage.local.set({ sidePanelState: 'closed' });
         }
         
-        // Always update local state
         setIsOpen(false);
     };
 
@@ -582,8 +558,13 @@ export default function Sidebar() {
                                     <span className="text-slate-300">API Endpoint</span>
                                     <input
                                         type="text"
+                                        value={serverURL}
+                                        onChange={(e) => {
+                                            const newURL = e.target.value;
+                                            setServerURL(newURL);
+                                            chrome.storage.local.set({ serverURL: newURL });
+                                        }}
                                         className="w-48 px-3 py-2 bg-slate-700/80 border border-slate-600/90 rounded-md text-white text-sm"
-                                        defaultValue="http://localhost:8000"
                                     />
                                 </div>
 

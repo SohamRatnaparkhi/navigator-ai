@@ -1,5 +1,6 @@
-import json
+
 import os
+import logging
 
 from app.api.services.storage_service import StorageService
 from app.api.services.task_service import TaskService
@@ -11,9 +12,11 @@ from app.models.tasks import TaskCreate, TaskResponse
 from fastapi import APIRouter, HTTPException
 from datetime import datetime
 
-from app.api.utils.llm import generate, generate_with_open_router
+from app.api.utils.llm import generate
 
 router = APIRouter()
+
+logger = logging.getLogger("task_logger")
 
 
 @router.post("/create", response_model=TaskResponse)
@@ -35,13 +38,11 @@ async def update_task(update: DOMUpdate):
             element_tree=update.structure
         )
 
-
-
         task_text = TaskService.get_task(update.task_id)
 
         task_history = TaskService.get_task_history(update.task_id)
         prev_step_ans = TaskService.get_prev_step_ans(update.task_id)
-        print(f"Retrieved history for task {update.task_id}: {len(task_history)} entries with {update.result} results")
+        logger.info(f"Retrieved history for task {update.task_id}: {len(task_history)} entries with {update.result} results")
 
         user_message, xpath_map, selector_map = build_user_message(
             dom_state=dom_state,
@@ -56,7 +57,7 @@ async def update_task(update: DOMUpdate):
         processed_result = process_element_references(result, xpath_map, selector_map)
 
         if processed_result and hasattr(processed_result, "actions") and processed_result.actions:
-            print(f"Storing AI-generated actions for task {update.task_id}")
+            logger.info(f"Storing AI-generated actions for task {update.task_id}")
             StorageService.append_task_history(update.task_id, {
                 "url": update.dom_data.url,
                 "timestamp": update.dom_data.timestamp,
@@ -76,7 +77,7 @@ async def update_task(update: DOMUpdate):
                 f.flush()
 
         except Exception as e:
-            print(f"Error saving snapshot: {str(e)}")
+            logger.error(f"Error saving snapshot: {str(e)}")
 
         return DOMUpdateResponse(
             status="success",
@@ -84,5 +85,5 @@ async def update_task(update: DOMUpdate):
             result=processed_result
         )
     except Exception as e:
-        print(f"Error processing DOM update: {str(e)}")
+        logger.error(f"Error processing DOM update: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

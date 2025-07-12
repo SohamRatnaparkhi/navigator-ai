@@ -1,8 +1,4 @@
-import json
-
 from app.api.utils.dom_parser.processor import parse_dom
-from app.config import settings
-from app.models.dom import DOMHashMap
 from fastapi import APIRouter
 from pydantic import BaseModel
 

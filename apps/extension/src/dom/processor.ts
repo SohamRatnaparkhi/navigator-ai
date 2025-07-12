@@ -1,140 +1,17 @@
 import { ExecuteActionResult, parseDOMonServer } from '@navigator-ai/core';
 import { Action } from '@navigator-ai/core';
-import { FrontendDOMState, ProcessingStatus } from '../types';
+import { FrontendDOMState, ProcessingStatus, Message } from '../types';
 import { captureIframeContents } from './iframe';
 import { highlightInteractiveElements } from '../highlight';
 import { handleAutomationActions } from '../automation';
 
-// export async function processDOM(task_id: string): Promise<FrontendDOMState> {
-//     try {
-//         console.log('Processing DOM for task:', task_id);
+// Add type for updateResponse
+type UpdateResponse = {
+    success: boolean;
+    data?: { result?: { actions?: Action[]; is_done?: boolean } };
+    error?: string;
+};
 
-//         const htmlContent = document.documentElement.outerHTML;
-        
-//         const processedHtml = await captureIframeContents(htmlContent);
-        
-//         console.log('Sending HTML with iframe contents to server for parsing...');
-//         const domStructure = await parseDOMonServer(processedHtml);
-//         console.log('Received parsed DOM structure from server');
-
-//         const domData: FrontendDOMState = {
-//             url: window.location.href,
-//             html: processedHtml,
-//             title: document.title,
-//             timestamp: new Date().toISOString(),
-//             structure: domStructure
-//         };
-
-//         console.log('Highlighting interactive elements');
-//         highlightInteractiveElements(domStructure);
-
-//         console.log('Sending DOM update to background, structure size:',
-//             JSON.stringify(domData.structure).length, 'bytes');
-
-//         // Send data to background script and wait for complete response including any actions
-//         return new Promise<FrontendDOMState>((resolve, reject) => {
-//             chrome.runtime.sendMessage({
-//                 type: 'dom_update',
-//                 task_id,
-//                 dom_data: domData,
-//                 result: []
-//             }, async response => {
-//                 console.log('Background script response from DOM update:', response);
-                
-//                 if (response && response.data) {
-//                     // Check if there are actions to execute and wait for them to complete
-//                     if (response.data.result?.actions && response.data.result.actions.length > 0) {
-//                         console.log('Waiting for actions to complete...');
-//                         try {
-//                             // Wait for actions from the update response to complete
-//                             // before resolving the processDOM promise
-//                             const actionResults = await handleAutomationActions(response.data.result.actions);
-//                             console.log('Action execution results:', actionResults);
-                            
-//                             // Only resolve after actions are complete
-//                             resolve(domData);
-//                         } catch (actionError) {
-//                             console.error('Error executing actions:', actionError);
-//                             reject(new Error('Failed to execute actions: ' + (actionError as Error).message));
-//                         }
-//                     } else {
-//                         // No actions to execute, resolve immediately
-//                         resolve(domData);
-//                     }
-//                 } else if (response && response.success) {
-//                     resolve(domData);
-//                 } else {
-//                     reject(new Error('Failed to update DOM: ' + (response?.error || 'Unknown error')));
-//                 }
-//             });
-//         });
-//     } catch (error) {
-//         console.error('Error processing DOM:', error);
-//         throw error;
-//     }
-// }
-
-// /**
-//  * Process DOM sequentially with multiple iterations
-//  * @param task_id The task ID
-//  * @param maxIterations Maximum number of iterations
-//  * @returns Promise with the result of the processing
-//  */
-// export async function sequentialDOMProcessing(task_id: string, maxIterations = 10) {
-//     // Always start with 0 iterations when workflow starts
-//     let iteration = 0;
-//     let isDone = false;
-    
-//     console.log('Starting sequential DOM processing for task:', task_id);
-    
-//     // Notify background script to reset iteration counter
-//     await new Promise<void>((resolve) => {
-//         chrome.runtime.sendMessage({
-//             type: 'resetIterations',
-//             task_id
-//         }, () => {
-//             resolve();
-//         });
-//     });
-    
-//     while (!isDone && iteration < maxIterations) {
-//         console.log(`Starting iteration ${iteration + 1} of DOM processing`);
-        
-//         try {
-//             // Step 1: Parse and update DOM, which now also waits for any actions to complete
-//             // This ensures the entire process is sequential
-//             await processDOM(task_id);
-            
-//             // Increment iteration counter after processing is complete
-//             iteration++;
-            
-//             // Step 2: Check if processing is done
-//             // After actions have completed, check if the task is marked as done
-//             isDone = await checkIfProcessingDone(task_id);
-            
-//             console.log(`Iteration ${iteration} complete. isDone:`, isDone);
-            
-//             // Add a small delay between iterations to avoid overwhelming the system
-//             if (!isDone && iteration < maxIterations) {
-//                 await new Promise(resolve => setTimeout(resolve, 500));
-//             }
-//         } catch (error) {
-//             console.error(`Error in iteration ${iteration + 1}:`, error);
-//             break;
-//         }
-//     }
-    
-//     console.log(`Sequential DOM processing complete after ${iteration} iterations`);
-//     return { success: true, iterations: iteration, isDone };
-// }
-
-/**
- * Perform a single iteration of DOM processing
- * @param task_id The task ID
- * @param iterationResults The results of previous iterations
- * @returns Promise with the result of the processing
- * Only this is useful
- */
 export async function singleDOMProcessIteration(task_id: string): Promise<{ 
     success: boolean; 
     error?: string;
@@ -143,6 +20,15 @@ export async function singleDOMProcessIteration(task_id: string): Promise<{
 }> {
     try {
         console.log('Starting single DOM process iteration for task:', task_id);
+        
+        // Wait for document to be ready
+        await new Promise<void>(resolve => {
+            if (document.readyState === 'complete' || document.readyState === 'interactive') {
+                resolve();
+            } else {
+                document.addEventListener('DOMContentLoaded', () => resolve(), {once: true});
+            }
+        });
         
         // Capture main document HTML
         const htmlContent = document.documentElement.outerHTML;
@@ -168,66 +54,56 @@ export async function singleDOMProcessIteration(task_id: string): Promise<{
         highlightInteractiveElements(domStructure);
         
         // Step 2: Start DOM update but don't wait for message response
-        console.log('Sending DOM update to server via background script');
-        
-        // Just trigger the DOM update, don't wait for direct response 
-        chrome.runtime.sendMessage({
-            type: 'dom_update',
-            task_id,
-            dom_data: domData
+        console.log('Sending DOM update to server via background script and awaiting response');
+        const updateResponse: UpdateResponse = await new Promise((resolve) => {
+            chrome.runtime.sendMessage({
+                type: 'dom_update',
+                task_id,
+                dom_data: domData
+            }, (response: UpdateResponse) => {
+                if (chrome.runtime.lastError) {
+                    console.error('Error sending dom_update:', chrome.runtime.lastError);
+                    resolve({ success: false, error: chrome.runtime.lastError.message });
+                } else {
+                    resolve(response);
+                }
+            });
         });
         
-        // Instead of relying on message response, wait for the processing status to change
-        console.log('Waiting for DOM update to complete...');
-        const waitForStatus = await waitForProcessingStatus(task_id, 'completed', 120000);
-        
-        if (!waitForStatus) {
-            // If completion never happened, check if there's an error status
-            const taskState = await chrome.storage.local.get(['taskState']);
-            if (taskState.taskState?.processingStatus === 'error') {
-                return { success: false, error: 'DOM update failed with error' };
-            }
-            
-            return { success: false, error: 'DOM update timed out waiting for completion' };
+        if (!updateResponse.success) {
+            console.error('DOM update failed:', updateResponse.error);
+            return { success: false, error: updateResponse.error || 'DOM update failed' };
         }
         
-        // Get the update result from storage
-        const updateResult = await getLatestUpdateResult(task_id);
+        console.log('DOM update successful:', updateResponse);
+        const updateResult = { data: updateResponse.data }; // Match the structure
         
-        if (!updateResult.success) {
-            console.error('Failed to get update result:', updateResult.error);
-            return { success: false, error: updateResult.error };
-        }
-        
-        console.log('DOM update successful:', updateResult);
-        
-        // Check if backend signaled to complete
         const isDone = !!updateResult.data?.result?.is_done;
         
-        // Step 3: Handle any actions returned from the server
+        // Handle actions
         if (updateResult.data?.result?.actions && updateResult.data.result.actions.length > 0) {
-            console.log('Executing actions from update response');
+            console.log('Executing actions from update response:', updateResult.data.result.actions);
             const actions = updateResult.data.result.actions;
             
             try {
-                // Mark status as executing actions
                 await chrome.runtime.sendMessage({
                     type: 'updateProcessingStatus',
                     task_id,
                     status: 'executing_actions'
                 });
                 
+                console.log('About to execute actions:', actions);
                 const actionResults = await handleAutomationActions(actions);
+                console.log('Action execution completed with results:', actionResults);
                 
                 const iterationResults = (await chrome.storage.local.get(['iterationResults'])).iterationResults || [];
                 iterationResults?.push({
                     task_id,
-                    actionResults
+                    result: actionResults
                 });
                 await chrome.storage.local.set({ iterationResults });
-                console.log('Action execution results:', actionResults, iterationResults);
+                console.log('Stored iteration results:', actionResults);
 
-                // Mark status as completed after actions are done
                 await chrome.runtime.sendMessage({
                     type: 'updateProcessingStatus',
                     task_id,
@@ -235,21 +111,18 @@ export async function singleDOMProcessIteration(task_id: string): Promise<{
                 });
             } catch (actionError) {
                 console.error('Error executing actions:', actionError);
-                
-                // Mark status as error if actions failed
                 await chrome.runtime.sendMessage({
                     type: 'updateProcessingStatus',
                     task_id,
                     status: 'error'
                 });
-                
                 return { 
                     success: false, 
                     error: actionError instanceof Error ? actionError.message : String(actionError)
                 };
             }
         } else {
-            // Explicitly mark as completed if no actions needed
+            console.log('No actions to execute, marking as completed');
             await chrome.runtime.sendMessage({
                 type: 'updateProcessingStatus',
                 task_id,
@@ -365,76 +238,31 @@ export function checkIfProcessingDone(task_id: string): Promise<boolean> {
 export async function waitForProcessingStatus(
     task_id: string, 
     targetStatus: ProcessingStatus, 
-    timeoutMs = 60000
+    timeoutMs = 120000
 ): Promise<boolean> {
-    const startTime = Date.now();
-    let statusCheckCount = 0;
-    
     return new Promise<boolean>((resolve) => {
-        // Set a timeout to avoid hanging forever
         const timeoutId = setTimeout(() => {
-            console.warn(`Waiting for status ${targetStatus} timed out after ${timeoutMs}ms`);
-            // Force status to completed if we're waiting for completed status and timing out
-            if (targetStatus === 'completed') {
-                console.warn('Forcing status to completed to avoid being stuck');
-                chrome.runtime.sendMessage({
-                    type: 'updateProcessingStatus',
-                    task_id,
-                    status: 'completed'
-                }).catch(err => console.error('Error forcing status update:', err));
-            }
+            chrome.runtime.onMessage.removeListener(listener);
+            console.warn(`Timeout waiting for ${targetStatus} for task ${task_id}`);
             resolve(false);
         }, timeoutMs);
-        
-        // Check status periodically
-        const checkStatus = async () => {
-            statusCheckCount++;
-            const result = await chrome.storage.local.get(['taskState']);
-            const currentStatus = result.taskState?.processingStatus;
-            
-            console.log(`Current processing status: ${currentStatus}, waiting for: ${targetStatus} (check #${statusCheckCount})`);
-            
-            if (currentStatus === targetStatus) {
-                clearTimeout(timeoutId);
-                resolve(true);
-                return;
+
+        const listener = (message: Message) => {
+            if (message.type === 'processingStatusUpdate' && 
+                message.task_id === task_id) {
+                if (message.status === targetStatus) {
+                    clearTimeout(timeoutId);
+                    chrome.runtime.onMessage.removeListener(listener);
+                    resolve(true);
+                } else if (message.status === 'error') {
+                    clearTimeout(timeoutId);
+                    chrome.runtime.onMessage.removeListener(listener);
+                    resolve(false);
+                }
             }
-            
-            // If error status, stop waiting
-            if (currentStatus === 'error') {
-                clearTimeout(timeoutId);
-                console.error('Processing status shows error, stopping wait');
-                resolve(false);
-                return;
-            }
-            
-            // If waiting for completion and stuck in executing_actions for too long, force completion
-            if (targetStatus === 'completed' && currentStatus === 'executing_actions' && statusCheckCount > 10) {
-                clearTimeout(timeoutId);
-                console.warn('Execution taking too long, forcing completion status');
-                await chrome.runtime.sendMessage({
-                    type: 'updateProcessingStatus',
-                    task_id,
-                    status: 'completed'
-                }).catch(err => console.error('Error forcing status update:', err));
-                resolve(true);
-                return;
-            }
-            
-            // If we've waited too long, stop
-            if (Date.now() - startTime > timeoutMs - 5000) { // Leave 5s buffer for timeout
-                clearTimeout(timeoutId);
-                console.warn(`Waiting for status ${targetStatus} timed out after ${Date.now() - startTime}ms`);
-                resolve(false);
-                return;
-            }
-            
-            // Check again after a delay
-            setTimeout(checkStatus, 500);
         };
-        
-        // Start checking
-        checkStatus();
+
+        chrome.runtime.onMessage.addListener(listener);
     });
 }
 

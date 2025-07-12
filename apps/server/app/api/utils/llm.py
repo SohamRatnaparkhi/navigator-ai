@@ -1,14 +1,13 @@
-import base64
 import json
 import os
 import re
+import logging
 from typing import List, Optional
 
 from google import genai
 from google.genai import types
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from openai import AsyncOpenAI, OpenAI
 
 from dotenv import load_dotenv
 
@@ -17,6 +16,8 @@ load_dotenv()
 client = genai.Client(
     api_key=os.environ.get("GEMINI_API_KEY"),
 )
+
+logger = logging.getLogger("llm_logger")
 
 class Action(BaseModel):
     type: str
@@ -80,7 +81,7 @@ def parse_json_from_text(text):
 
 def generate(user_prompt, system_prompt) -> GenerateResponse:
 
-    model = "gemini-2.5-pro-preview-03-25"
+    model = "gemini-2.5-pro"
     contents = [
         types.Content(
             role="user",
@@ -174,18 +175,18 @@ def generate(user_prompt, system_prompt) -> GenerateResponse:
         contents=contents,
         config=generate_content_config,
     )
-    print(response.text)
-    print(response.usage_metadata)
+    logger.info(response.text)
+    logger.info(response.usage_metadata)
     
     try:
         json_response = json.loads(response.text)
         return GenerateResponse.model_validate(json_response)
     except json.JSONDecodeError:
-        print("Warning: LLM returned invalid JSON. Attempting to fix...")
+        logger.warning("Warning: LLM returned invalid JSON. Attempting to fix...")
         fixed_json = parse_json_from_text(response.text)
         return GenerateResponse.model_validate(fixed_json)
     except Exception as e:
-        print(f"Error processing response: {e}")
+        logger.error(f"Error processing response: {e}")
         # Return a fallback JSON response
         fallback = {
             "current_state": {
@@ -199,11 +200,6 @@ def generate(user_prompt, system_prompt) -> GenerateResponse:
         return GenerateResponse.model_validate(fallback)
 
 
-# generate()
-# client = OpenAI(
-#     base_url="https://openrouter.ai/api/v1",
-#     api_key=os.environ.get("OPENROUTER_API_KEY"),
-# )
 def generate_with_open_router(user_prompt, system_prompt) -> GenerateResponse:
     response = client.chat.completions.create(
         model="deepseek/deepseek-r1:free",
@@ -252,7 +248,7 @@ def generate_with_open_router(user_prompt, system_prompt) -> GenerateResponse:
         json_response = response.choices[0].message.content
         return GenerateResponse.model_validate(json.loads(json_response))
     except Exception as e:
-        print(f"Error processing response: {e}")
+        logger.error(f"Error processing response: {e}")
         fallback = {
             "current_state": {
                 "page_summary": "Error processing LLM response.",

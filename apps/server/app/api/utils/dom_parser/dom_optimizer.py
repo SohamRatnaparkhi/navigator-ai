@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.api.utils.llm import GenerateResponse
 
@@ -7,8 +7,7 @@ logger = logging.getLogger("dom-mapper")
 
 class HighlightStyleMapper:
     """
-    Creates a DOM representation similar to the clickable_elements_to_string method
-    with highlight indices. Uses E-ids instead and provides both XPath and selector maps.
+    This class is used to generate a DOM representation from dom tree.
     """
 
     def __init__(self, include_attributes=None):
@@ -23,7 +22,7 @@ class HighlightStyleMapper:
 
     def create_highlight_representation(self, dom_hashmap: Dict) -> Tuple[str, Dict, Dict]:
         """
-        Generate a representation similar to clickable_elements_to_string.
+        This method is used to generate a DOM representation from dom tree.
         
         Returns:
             Tuple of (highlight_representation, xpath_map, selector_map)

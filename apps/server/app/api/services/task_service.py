@@ -11,10 +11,8 @@ class TaskService:
     @staticmethod
     def create_task(task: TaskCreate) -> TaskResponse:
         """Create a new task"""
-        # Generate a unique task ID with timestamp
         task_id = f"task_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4()}"
 
-        # Store task in Redis
         StorageService.store_task(task_id, task.task)
 
         return TaskResponse(
