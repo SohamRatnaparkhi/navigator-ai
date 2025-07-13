@@ -1,0 +1,69 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+.env/
+
+# Environment Variables
+.env
+.env.*
+!.env.example
+
+# Build Outputs
+.next/
+out/
+build/
+dist/
+*.egg-info/
+
+# Cache
+.turbo/
+.cache/
+.eslintcache
+*.tsbuildinfo
+.pytest_cache/
+
+# Testing
+coverage/
+.coverage
+htmlcov/
+
+# Development Tools
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Debug Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+debug.log
+*.log
+
+# System Files
+.DS_Store
+Thumbs.db
+*.pem
+
+# Deployment
+.vercel
+.netlify
+
+# Python
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Temp files
+*.tmp
+*~
+extension_code.txt
+apps/server/dom_snapshots/
+
+full_code.txt
