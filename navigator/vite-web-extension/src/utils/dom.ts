@@ -1,30 +1,28 @@
-export const getFullDOM = (): Promise<{ main: string; iframes: string[] }> =>
-    new Promise((resolve) => {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (!tabs[0]) return resolve({ main: "", iframes: [] });
-        const tabId = tabs[0].id!;
-        chrome.webNavigation.getAllFrames({ tabId }, (frames) => {
-          if (!frames) return resolve({ main: "", iframes: [] });
+import { sendMessageToBackground } from "./messages"
+import type { DOMData } from "../types"
 
-          Promise.all(
-            frames.map(
-              (frame) =>
-                new Promise<{ id: number; html: string }>((res) => {
-                  chrome.scripting.executeScript(
-                    {
-                      target: { tabId, frameIds: [frame.frameId] },
-                      func: () => document.documentElement.outerHTML,
-                    },
-                    (results) =>
-                      res({ id: frame.frameId, html: results?.[0]?.result ?? "" })
-                  );
-                })
-            )
-          ).then((payload) => {
-            const main = payload.find((p) => p.id === 0)?.html ?? "";
-            const iframes = payload.filter((p) => p.id !== 0).map((p) => p.html);
-            resolve({ main, iframes });
-          });
-        });
-      });
-    });
+export function isValidUrl(url: string): boolean {
+    return typeof url === 'string' &&
+        !url.startsWith('chrome://') &&
+        !url.startsWith('chrome-extension://') &&
+        !url.startsWith('chrome-search://') &&
+        !url.startsWith('about:') &&
+        !url.startsWith('edge://') &&
+        !url.startsWith('brave://');
+}
+
+export const collectDOMData = async (): Promise<DOMData> => {
+  console.log('Requesting DOM data from background');
+  const response = await sendMessageToBackground({ type: 'COLLECT_DOM_DATA' });
+  if (response.type !== 'COLLECT_DOM_DATA_RESPONSE') {
+    throw new Error('Unexpected response type');
+  }
+  const { payload } = response;
+  if (payload.success && payload.data) {
+    console.log('Received DOM data successfully');
+    return payload.data;
+  } else {
+    console.error('Error collecting DOM:', payload.error);
+    throw new Error(payload.error || 'Failed to collect DOM data');
+  }
+};

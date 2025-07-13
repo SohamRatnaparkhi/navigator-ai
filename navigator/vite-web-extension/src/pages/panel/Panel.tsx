@@ -7,6 +7,10 @@ import ChatMessages from "./ChatMessages"
 import InputArea from "./InputArea"
 import Settings from "./Settings"
 
+import { collectDOMData } from "../../utils/dom"
+import { createTask, updateTaskDom } from "../../utils/api"
+import type { Message } from "../../types"
+
 const llms = [
   { id: 1, name: "Gemini 2.5 Pro", unavailable: false },
   { id: 2, name: "GPT-4o", unavailable: false },
@@ -20,12 +24,11 @@ export default function Panel() {
   const [mode, setMode] = useState("agent")
   const [query, setQuery] = useState("")
   const [isProcessing, setIsProcessing] = useState(false)
-  const [messages, setMessages] = useState<{ type: string; text: string }[]>([])
+  const [messages, setMessages] = useState<Message[]>([])
   const [selectedLlm, setSelectedLlm] = useState(llms[0])
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    // Simulate chrome storage for demo
     const savedTheme = localStorage.getItem("theme") || "dark"
     const savedServerUrl = localStorage.getItem("serverUrl") || "http://localhost:8000"
     setTheme(savedTheme)
@@ -116,19 +119,51 @@ export default function Panel() {
   const handleQuerySubmit = async () => {
     if (!query.trim()) return
 
+    // Allow stopping the current processing if user submits while processing
     if (isProcessing) {
       setIsProcessing(false)
       return
     }
 
-    setIsProcessing(true)
-    setMessages([...messages, { type: "user", text: query }])
-    const currentQuery = query
+    const currentQuery = query.trim()
+    setMessages((prev) => [...prev, { type: "user", text: currentQuery }])
     setQuery("")
+    setIsProcessing(true)
 
     if (mode === "agent") {
-      simulateAgent()
+      try {
+        const domData = await collectDOMData()
+
+        const { task_id, chain_of_thought = null } = await createTask(serverUrl, currentQuery)
+        console.log("Chain of Thought", chain_of_thought)
+        console.log("Task ID", task_id)
+
+        const taskMessage: Message = { type: "agent", text: `🆕 Task created with ID: ${task_id}` }
+        const cotMessages: Message[] = chain_of_thought
+          ? [{ type: "cot", cot: chain_of_thought }]
+          : []
+        setMessages((prev) => [...prev, taskMessage, ...cotMessages])
+
+        await updateTaskDom(serverUrl, {
+          task_id,
+          dom_data: domData,
+          iterationNumber: 0,
+          openTabsWithIds: [],
+          currentTab: null,
+        })
+
+        setMessages((prev) => [
+          ...prev,
+          { type: "agent", text: `🌐 DOM snapshot sent for task ${task_id}.` },
+        ])
+      } catch (err: any) {
+        const errorMsg = err?.message || "An unexpected error occurred."
+        setMessages((prev) => [...prev, { type: "agent", text: `❌ ${errorMsg}` }])
+      } finally {
+        setIsProcessing(false)
+      }
     } else {
+      // Handle "ask" mode
       simulateAsk(currentQuery)
     }
   }

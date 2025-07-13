@@ -1,8 +1,10 @@
 import { useRef, useEffect } from "react";
 import { SparklesIcon } from "@heroicons/react/24/solid";
+import type { Message } from "../../types";
+import ChainOfThoughtMessage from "./ChainOfThoughtMessage";
 
 interface ChatMessagesProps {
-  messages: { type: string; text: string }[];
+  messages: Message[];
   isProcessing: boolean;
   mode: string;
   theme: string;
@@ -11,6 +13,7 @@ interface ChatMessagesProps {
 export default function ChatMessages({ messages, isProcessing, mode, theme }: ChatMessagesProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  console.log("Chat Messages", messages)
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -41,17 +44,21 @@ export default function ChatMessages({ messages, isProcessing, mode, theme }: Ch
 
       {messages.map((msg, i) => (
         <div key={i} className={`flex animate-fade-in ${msg.type === "user" ? "justify-end" : "justify-start"}`}>
-          <div
-            className={`max-w-[85%] rounded-2xl px-4 py-3 ${
-              msg.type === "user"
-                ? "bg-blue-500 text-white shadow-lg shadow-blue-500/25"
-                : theme === "dark"
-                  ? "bg-gray-800 text-gray-200 border border-gray-700"
-                  : "bg-gray-100 text-gray-800 border border-gray-200"
-            }`}
-          >
-            <p className="text-sm leading-relaxed">{msg.text}</p>
-          </div>
+          {msg.type === "cot" ? (
+            <ChainOfThoughtMessage cot={msg.cot} theme={theme} />
+          ) : (
+            <div
+              className={`max-w-[85%] rounded-2xl px-4 py-3 ${
+                msg.type === "user"
+                  ? "bg-blue-500 text-white shadow-lg shadow-blue-500/25"
+                  : theme === "dark"
+                    ? "bg-gray-800 text-gray-200 border border-gray-700"
+                    : "bg-gray-100 text-gray-800 border border-gray-200"
+              }`}
+            >
+              <p className="text-sm leading-relaxed">{msg.text}</p>
+            </div>
+          )}
         </div>
       ))}
 

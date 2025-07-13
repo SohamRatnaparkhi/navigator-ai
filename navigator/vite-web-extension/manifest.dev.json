@@ -21,7 +21,8 @@
     "windows",
     "clipboardWrite",
     "clipboardRead",
-    "tabs"
+    "tabs",
+    "webNavigation"
   ],
   "content_scripts": [
     {
