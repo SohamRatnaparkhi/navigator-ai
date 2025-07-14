@@ -58,42 +58,6 @@ export default function Panel() {
     setIsProcessing(false)
   }
 
-  const simulateAgent = async () => {
-    let count = 0
-    const maxIterations = 3
-
-    while (isProcessing && count < maxIterations) {
-      await new Promise((res) => setTimeout(res, 1500))
-      setMessages((msgs) => [
-        ...msgs,
-        {
-          type: "agent",
-          text: `Step ${count + 1}: Analyzing page structure and identifying interactive elements...`,
-        },
-      ])
-
-      await new Promise((res) => setTimeout(res, 1000))
-      setMessages((msgs) => [
-        ...msgs,
-        {
-          type: "agent",
-          text: `Step ${count + 1}: Executing automated actions based on your request...`,
-        },
-      ])
-
-      count++
-    }
-
-    setIsProcessing(false)
-    setMessages((msgs) => [
-      ...msgs,
-      {
-        type: "agent",
-        text: `✅ Task completed successfully! Performed ${count} automated actions.`,
-      },
-    ])
-  }
-
   const simulateAsk = async (q: string) => {
     await new Promise((res) => setTimeout(res, 1000))
     setMessages((msgs) => [
@@ -129,14 +93,19 @@ export default function Panel() {
     setMessages((prev) => [...prev, { type: "user", text: currentQuery }])
     setQuery("")
     setIsProcessing(true)
+    
+    const url = window.location.href
+    const tabs = await chrome.tabs.query({
+      windowId: chrome.windows.WINDOW_ID_CURRENT,
+    })
+    const currentTab = tabs[0]
+    const openTabsWithIds = tabs.map((tab) => `${tab.id}`)
 
     if (mode === "agent") {
       try {
         const domData = await collectDOMData()
 
-        const { task_id, chain_of_thought = null } = await createTask(serverUrl, currentQuery)
-        console.log("Chain of Thought", chain_of_thought)
-        console.log("Task ID", task_id)
+        const { task_id, chain_of_thought = null } = await createTask(serverUrl, currentQuery, url, openTabsWithIds, `${currentTab.id}`)
 
         const taskMessage: Message = { type: "agent", text: `🆕 Task created with ID: ${task_id}` }
         const cotMessages: Message[] = chain_of_thought

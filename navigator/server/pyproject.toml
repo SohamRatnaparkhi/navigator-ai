@@ -1,0 +1,21 @@
+[project]
+name = "navigator-agent-server"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "SohamRatnaparkhi",email = "soham.ratnaparkhi@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "google-genai (>=1.25.0,<2.0.0)",
+    "bs4 (>=0.0.2,<0.0.3)",
+    "fastapi[standard] (>=0.116.1,<0.117.0)",
+    "python-dotenv (>=1.1.1,<2.0.0)",
+    "redis (>=6.2.0,<7.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

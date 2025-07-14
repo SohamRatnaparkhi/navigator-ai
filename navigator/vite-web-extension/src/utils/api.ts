@@ -1,10 +1,10 @@
 import type { DOMData, CreateTaskResponse, DOMUpdate } from "../types";
 import { sendMessageToBackground } from "./messages";
 
-export async function createTask(serverUrl: string, query: string): Promise<CreateTaskResponse> {
+export async function createTask(serverUrl: string, query: string, url: string, openTabsWithIds: string[], currentTab: string): Promise<CreateTaskResponse> {
   const response = await sendMessageToBackground({
     type: "CREATE_TASK",
-    payload: { serverUrl, query }
+    payload: { serverUrl, query, url, openTabsWithIds, currentTab }
   });
 
   if (response.type === "CREATE_TASK_RESPONSE") {

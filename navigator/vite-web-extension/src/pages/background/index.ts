@@ -68,7 +68,7 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
 })
 
 async function handleCreateTask(message: CreateTaskMessage): Promise<ContentMessage> {
-  const { serverUrl, query } = message.payload;
+  const { serverUrl, query, url, openTabsWithIds, currentTab } = message.payload;
   
   try {
     const response = await fetch(`${serverUrl.replace(/\/$/, '')}/tasks/create`, {
@@ -76,7 +76,7 @@ async function handleCreateTask(message: CreateTaskMessage): Promise<ContentMess
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ task: query }),
+      body: JSON.stringify({ task: query, url, openTabsWithIds, currentTab }),
     });
 
     if (!response.ok) {

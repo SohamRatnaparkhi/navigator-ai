@@ -6,6 +6,9 @@ export interface CreateTaskMessage {
   payload: {
     serverUrl: string;
     query: string;
+    url: string;
+    openTabsWithIds: string[];
+    currentTab: string;
   };
 }
 

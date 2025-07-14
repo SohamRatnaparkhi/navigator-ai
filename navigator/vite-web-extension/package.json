@@ -44,6 +44,8 @@
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3",
     "vite": "^6.3.5",
-    "vite-tsconfig-paths": "^5.1.4"
+    "vite-tsconfig-paths": "^5.1.4",
+    "@headlessui/react": "^2.2.4",
+    "@heroicons/react": "^2.2.0"
   }
 }
