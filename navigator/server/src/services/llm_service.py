@@ -1,5 +1,5 @@
 from typing import Optional
-from ..api.schemas.tasks import ChainOfThought, CoTStep
+from src.api.schemas.tasks import ChainOfThought, CoTStep
 
 def generate_chain_of_thought(query: str) -> Optional[ChainOfThought]:
     # Placeholder for LLM call; returns dummy data

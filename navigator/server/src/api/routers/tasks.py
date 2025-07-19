@@ -2,9 +2,9 @@ import uuid
 import logging
 from fastapi import APIRouter, Body
 from typing import Dict, Any
-from src.navigator_agent_server.services.redis_service import redis_client
-from src.navigator_agent_server.services.llm_service import generate_chain_of_thought
-from src.navigator_agent_server.api.schemas.tasks import CreateTaskRequest, CreateTaskResponse
+from src.services.redis_service import redis_client
+from src.services.llm_service import generate_chain_of_thought
+from src.api.schemas.tasks import CreateTaskRequest, CreateTaskResponse
 
 router = APIRouter(prefix="/tasks")
 logger = logging.getLogger(__name__)
