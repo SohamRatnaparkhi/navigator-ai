@@ -67,3 +67,5 @@ extension_code.txt
 apps/server/dom_snapshots/
 
 full_code.txt
+
+tmp/

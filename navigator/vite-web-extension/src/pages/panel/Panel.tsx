@@ -105,6 +105,8 @@ export default function Panel() {
       try {
         const domData = await collectDOMData()
 
+        console.log(domData)
+
         const { task_id, chain_of_thought = null } = await createTask(serverUrl, currentQuery, url, openTabsWithIds, `${currentTab.id}`)
 
         const taskMessage: Message = { type: "agent", text: `🆕 Task created with ID: ${task_id}` }
@@ -118,7 +120,7 @@ export default function Panel() {
           dom_data: domData,
           iterationNumber: 0,
           openTabsWithIds: [],
-          currentTab: null,
+          currentTab: currentTab ? { id: currentTab.id, url: currentTab.url } : null,
         })
 
         setMessages((prev) => [

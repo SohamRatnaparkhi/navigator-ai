@@ -30,7 +30,7 @@ Browser.action.onClicked.addListener((tab) => {
 
 chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendResponse) => {
   console.log('Background received message:', message)
-  
+
   if (message.type === 'CREATE_TASK') {
     handleCreateTask(message)
       .then((response) => sendResponse(response))
@@ -40,7 +40,7 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
       }))
     return true
   }
-  
+
   if (message.type === 'UPDATE_TASK') {
     handleUpdateTask(message)
       .then((response) => sendResponse(response))
@@ -50,7 +50,7 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
       }))
     return true
   }
-  
+
   if (message.type === 'COLLECT_DOM_DATA') {
     handleCollectDomData()
       .then((data) => sendResponse({
@@ -63,13 +63,13 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
       }));
     return true;
   }
-  
+
   return false
 })
 
 async function handleCreateTask(message: CreateTaskMessage): Promise<ContentMessage> {
   const { serverUrl, query, url, openTabsWithIds, currentTab } = message.payload;
-  
+
   try {
     const response = await fetch(`${serverUrl.replace(/\/$/, '')}/tasks/create`, {
       method: 'POST',
@@ -84,7 +84,7 @@ async function handleCreateTask(message: CreateTaskMessage): Promise<ContentMess
     }
 
     const data = await response.json();
-    
+
     return {
       type: 'CREATE_TASK_RESPONSE',
       payload: {
@@ -108,7 +108,7 @@ async function handleCreateTask(message: CreateTaskMessage): Promise<ContentMess
 
 async function handleUpdateTask(message: UpdateTaskMessage): Promise<ContentMessage> {
   const { serverUrl, task_id, dom_data, iterationNumber, openTabsWithIds, currentTab } = message.payload;
-  
+
   try {
     const response = await fetch(`${serverUrl.replace(/\/$/, '')}/tasks/update`, {
       method: 'POST',
@@ -143,38 +143,132 @@ async function handleUpdateTask(message: UpdateTaskMessage): Promise<ContentMess
   }
 }
 
-async function handleCollectDomData(): Promise<DOMData> {
-  console.log('Background: Starting to collect DOM data');
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab || !tab.id) {
-    throw new Error('No active tab found');
-  }
-  const tabId = tab.id;
-  console.log(`Active tab: ${tabId}, url: ${tab.url}`);
-  if (!isValidUrl(tab.url || '')) {
-    throw new Error('Invalid URL for DOM collection');
-  }
-  const frames = await new Promise<any[] | null>((res) => chrome.webNavigation.getAllFrames({ tabId }, res));
-  if (!frames || frames.length === 0) {
-    throw new Error('No frames found');
-  }
-  console.log(`Found ${frames.length} frames`);
-  const payload = await Promise.all(
-    frames.map(async (frame) => {
-      console.log(`Injecting into frame ${frame.frameId}`);
-      const [result] = await chrome.scripting.executeScript({
-        target: { tabId, frameIds: [frame.frameId] },
-        func: () => document.documentElement.outerHTML,
-      });
-      return { id: frame.frameId, html: result?.result ?? '' };
-    })
-  );
-  const main = payload.find((p) => p.id === 0)?.html ?? "";
-  console.log(`Collected main HTML length: ${main.length}`);
-  return {
-    url: tab.url ?? "",
-    html: main,
-    title: tab.title ?? "",
-    timestamp: new Date().toISOString(),
-  };
+async function handleCollectDomData(): Promise<any> {
+    console.log('AGENT: Collecting DOM data with expanded viewport...');
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !tab.id) {
+        throw new Error('No active tab found');
+    }
+    const tabId = tab.id;
+
+    const allFrames = await chrome.webNavigation.getAllFrames({ tabId });
+    if (!allFrames) {
+        throw new Error('Could not get frame information for the tab.');
+    }
+
+    const executionResults = await Promise.all(
+        allFrames.map(frame => {
+            return chrome.scripting.executeScript({
+                target: { tabId, frameIds: [frame.frameId] },
+                func: () => {
+                    const isDebugMode = true; 
+                    const viewportExpansion = 100;
+
+                    const getRandomColor = (): string => {
+                        const letters = '0123456789ABCDEF';
+                        let color = '#';
+                        for (let i = 0; i < 6; i++) {
+                            color += letters[Math.floor(Math.random() * 16)];
+                        }
+                        return color;
+                    };
+
+                    const interactiveMetadata: Record<string, any> = {};
+                    let elementIdCounter = 0;
+
+                    const selector = 'a, button, input, select, textarea, summary, label[for], [role], [onclick], [contenteditable], [tabindex]';
+                    const viableCandidates: HTMLElement[] = [];
+                    const candidateElements = document.querySelectorAll(selector);
+
+                    // PASS 1: Filter and Tag viable candidates
+                    candidateElements.forEach(el => {
+                        if (!(el instanceof HTMLElement)) return;
+
+                        try {
+                            const rect = el.getBoundingClientRect();
+                            if (rect.width < 1 || rect.height < 1) return;
+
+                            if ((el as HTMLButtonElement).disabled || el.closest('[disabled]')) return;
+
+                            const isInExpandedViewport = (
+                                rect.top < (window.innerHeight + viewportExpansion) &&
+                                rect.bottom > (0 - viewportExpansion) &&
+                                rect.left < (window.innerWidth + viewportExpansion) &&
+                                rect.right > (0 - viewportExpansion)
+                            );
+
+                            if (!isInExpandedViewport) return;
+
+                            const centerX = rect.left + rect.width / 2;
+                            const centerY = rect.top + rect.height / 2;
+                            const topElement = document.elementFromPoint(centerX, centerY);
+                            if (!topElement || (!topElement.isSameNode(el) && !el.contains(topElement))) return;
+                            
+                            if (isDebugMode) {
+                                el.style.border = `2px solid ${getRandomColor()}`;
+                                el.style.boxSizing = 'border-box';
+                            }
+
+                            const elementId = `nav-id-${elementIdCounter++}`;
+                            el.setAttribute('data-navigator-id', elementId);
+                            viableCandidates.push(el);
+
+                        } catch (e) { /* Ignore errors */ }
+                    });
+
+                    // PASS 2: Analyze relationships now that all elements are tagged
+                    viableCandidates.forEach(el => {
+                        const elementId = el.getAttribute('data-navigator-id');
+                        if (!elementId) return;
+
+                        const style = window.getComputedStyle(el);
+                        const interactiveAncestor = el.parentElement?.closest('[data-navigator-id]');
+                        
+                        interactiveMetadata[elementId] = {
+                            cursor: style.cursor,
+                            interactive_ancestor_id: interactiveAncestor ? interactiveAncestor.getAttribute('data-navigator-id') : null
+                        };
+                    });
+
+                    const html = document.documentElement.outerHTML;
+                    
+
+                    if (!isDebugMode) {
+                      document.querySelectorAll('[data-navigator-id]').forEach(el => {
+                          el.removeAttribute('data-navigator-id');
+                          (el as HTMLElement).style.border = '';
+                      });
+                    }
+                    return { html, metadata: interactiveMetadata };
+                }
+            }).then(result => ({
+                frameId: frame.frameId,
+                parentFrameId: frame.parentFrameId,
+                url: frame.url,
+                result: result[0]?.result 
+            }));
+        })
+    );
+
+    const framesData = executionResults.filter(r => r.result).map(r => ({
+        frame_id: r.frameId,
+        parent_frame_id: r.parentFrameId,
+        url: r.url,
+        html: r.result?.html ?? '',
+        metadata: r.result?.metadata ?? {}
+    }));
+
+    if (framesData.length === 0) {
+        throw new Error("Failed to collect DOM from any frames.");
+    }
+    
+    console.log(`AGENT: Collection complete. Captured data from ${framesData.length} frames.`);
+    console.log("data", framesData);
+
+    return {
+        url: tab.url ?? "",
+        title: tab.title ?? "",
+        timestamp: new Date().toISOString(),
+        frames: framesData
+    };
 }
