@@ -1,6 +1,6 @@
 import logging
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 
 
 from src.api.schemas.dom import DOMTagNode
@@ -152,18 +152,18 @@ def advanced_dom_optimizer(
     parsed_frames: Dict[int, Dict[int, 'DOMTagNode']],
     detail_level: str,
     main_frame_id: int = 0
-) -> Tuple[str, Dict[str, str]]:
+) -> Tuple[Dict[int, str], Dict[int, Dict[str, Any]], Dict[str, str]]:
     """
     The final, corrected optimizer that includes all interactive elements and adds
     element_id to every rendered node.
     """
-    output_lines = []
-    processed_node_ids = set()
+    optimized_dict = {}
+    element_data: Dict[int, Dict[str, Any]] = {}
     url_map: Dict[str, str] = {}
     url_counter = 0
 
-    interactive_text_limit = 150
-    context_text_limit = 1000 if detail_level == 'summary' else 250
+    interactive_text_limit = 300
+    context_text_limit = 1500 if detail_level == 'summary' else 500
 
     ATTRIBUTE_PRIORITY = {
         'input': ['type', 'placeholder', 'name', 'aria-label', 'title', 'value', 'class', 'id'],
@@ -176,123 +176,147 @@ def advanced_dom_optimizer(
         'span': ['role', 'aria-label', 'title', 'class', 'id'],
     }
 
+    excluded_attrs = {'style', 'width', 'height', 'bgcolor', 'color', 'align', 'valign', 'border', 'margin', 'padding', 'font-family', 'font-size', 'line-height', 'background', 'background-color', 'background-image', 'cursor', 'display', 'float', 'position', 'top', 'right', 'bottom', 'left', 'z-index', 'opacity', 'transform', 'transition', 'animation'}
+    url_attrs = {'href', 'src', 'data-src', 'action'}
+
+    def filter_classes(value) -> str:
+        if not value:
+            return ''
+        classes = value.split() if isinstance(value, str) else value
+        style_keywords = ['bg', 'text', 'font', 'color', 'border', 'shadow', 'flex', 'grid', 'hidden', 'visible', 'p-', 'm-', 'w-', 'h-', 'rounded', 'cursor', 'overflow', 'z-', 'opacity', 'absolute', 'relative', 'fixed', 'sticky', 'block', 'inline', 'justify', 'items', 'self', 'gap', 'col', 'row', 'md', 'lg', 'sm', 'xl']
+        filtered = [cls for cls in classes if not any(kw in cls for kw in style_keywords)]
+        return ' '.join(filtered)
+
     def _format_attributes(node: 'DOMTagNode') -> str:
         nonlocal url_counter
-        if detail_level == 'summary':
-            return ""
-
         tag = node.tag.lower()
-        priority_attrs = ATTRIBUTE_PRIORITY.get(
-            tag, ['role', 'aria-label', 'title', 'class', 'id'])
+        if detail_level == 'summary':
+            priority_attrs = ['id', 'class', 'role', 'aria-label', 'title']
+        else:
+            priority_attrs = ATTRIBUTE_PRIORITY.get(
+                tag, ['role', 'aria-label', 'title', 'class', 'id'])
         attr_parts = []
         for attr in priority_attrs:
             value = node.attributes.get(attr)
-            if isinstance(value, list): 
-                value = " ".join(value)
-
-            if value and isinstance(value, str):
-                if (attr == 'href' or attr == 'src') and len(value) > 100:
-                    url_id = f"url_{url_counter}"
+            if value is None or attr in excluded_attrs:
+                continue
+            if attr == 'class':
+                display_value = filter_classes(value)
+                if not display_value:
+                    continue
+            elif isinstance(value, list):
+                value = ' '.join(value)
+                display_value = value if len(value) <= 75 else value[:75] + '...'
+            else:
+                if attr in url_attrs and len(value) > 50:
+                    truncated = value[:20] + '...' + value[-20:]
+                    url_id = f'url_{url_counter}'
                     url_map[url_id] = value
-                    display_value = url_id
+                    display_value = f'{truncated} {url_id}'
                     url_counter += 1
                 else:
-                    display_value = (
-                        value[:75] + '...') if len(value) > 75 else value
-                attr_parts.append(f"{attr}='{display_value}'")
+                    display_value = value if len(value) <= 75 else value[:75] + '...'
+            attr_parts.append(f"{attr}='{display_value}'")
         return " ".join(attr_parts)
 
-    def _get_all_descendants(node_id: int, frame_id: int) -> List[int]:
-        descendants = []
-        q = [node_id]
-        visited = {node_id}
+    for frame_id, frame_dom in parsed_frames.items():
+        if not frame_dom:
+            continue
 
-        start_node = parsed_frames.get(frame_id, {}).get(node_id)
-        if not start_node:
-            return []
+        all_child_ids = {cid for node in frame_dom.values() for cid in node.children_ids}
+        root_node_ids = [nid for nid in frame_dom if nid not in all_child_ids]
 
-        q = list(start_node.children_ids)
-        visited.update(q)
-        descendants.extend(q)
+        output_lines = []
+        rendered_node_ids = set()
+        processed_node_ids = set()
 
-        while q:
-            curr_id = q.pop(0)
-            node = parsed_frames.get(frame_id, {}).get(curr_id)
-            if node:
-                for child_id in node.children_ids:
-                    if child_id not in visited:
-                        visited.add(child_id)
-                        descendants.append(child_id)
-                        q.append(child_id)
-        return descendants
+        def _traverse_and_render(node_id: int, depth: int):
+            if node_id in processed_node_ids or depth > 25:
+                return
 
-    def _traverse_and_render(node_id: int, frame_id: int, depth: int):
-        if node_id in processed_node_ids or depth > 25:
-            return
+            node = frame_dom.get(node_id)
+            if not node:
+                return
 
-        node = parsed_frames.get(frame_id, {}).get(node_id)
-        if not node:
-            return
+            processed_node_ids.add(node_id)
+            tag = node.tag.lower()
 
-        processed_node_ids.add(node_id)
-        tag = node.tag.lower()
-        indent = "  " * depth
-
-        should_traverse_children = False
-
-        if node.is_interactive:
-            text = " ".join((node.text_content or "").split())[
-                :interactive_text_limit]
-            attributes_str = _format_attributes(node)
-            description = f"{attributes_str} text='{text}'".strip()
-            output_lines.append(
-                f"{indent}[{tag.capitalize()} id={node.element_id} {description}]")
-            should_traverse_children = True
-        else:
-            has_interactive_descendant = any(
-                parsed_frames.get(frame_id, {}).get(desc_id, {}).is_interactive
-                for desc_id in _get_all_descendants(node_id, frame_id)
+            is_interactive = (
+                node.is_interactive
+                or node.attributes.get('contenteditable') == 'true'
+                or node.attributes.get('role') in ['textbox', 'searchbox', 'combobox', 'listbox']
+                or tag in ['input', 'textarea', 'select', 'button', 'a']
             )
+            has_text = node.text_content and len(node.text_content.strip()) > 0
+            is_important_tag = tag in ['h1', 'h2', 'h3', 'p', 'span', 'li', 'div', 'img']
 
-            if has_interactive_descendant:
-                should_traverse_children = True
-            else:
-                if tag in ['h1', 'h2', 'h3', 'p', 'span', 'li', 'div'] and node.text_content:
-                    text = " ".join(node.text_content.split())
-                    if text:
-                        display_text = (
-                            text[:context_text_limit] + '...') if len(text) > context_text_limit else text
-                        output_lines.append(
-                            f"{indent}[{tag.capitalize()} id={node.element_id}] {display_text}")
+            if node.navigator_id or is_interactive or (has_text and is_important_tag):
+                navigator_str = f"navigator_id={node.navigator_id} " if node.navigator_id else ""
+                attributes_str = _format_attributes(node)
+                if is_interactive:
+                    text = " ".join((node.text_content or "").split())[:interactive_text_limit]
+                    full_text = node.text_content
+                    description = f"{navigator_str}{attributes_str} text='{text}'".strip()
+                    output_lines.append(
+                        f"[{tag} element_id={node.element_id} {description}]")
+                elif has_text:
+                    text = " ".join(node.text_content.split())[:context_text_limit]
+                    full_text = node.text_content
+                    if len(node.text_content.split()) > context_text_limit:
+                        text += '...'
+                    description = f"{navigator_str}{attributes_str}".strip()
+                    output_lines.append(
+                        f"[{tag} element_id={node.element_id} {description}] {text}")
                 elif tag == 'img':
                     alt_text = node.attributes.get('alt', 'decorative image')
                     output_lines.append(
-                        f"{indent}[Image id={node.element_id} alt='{alt_text}']")
+                        f"[Image element_id={node.element_id} {navigator_str}alt='{alt_text}']")
+                    full_text = None
+                rendered_node_ids.add(node.element_id)
 
-        if should_traverse_children:
+                full_attrs = {k: v for k, v in node.attributes.items() if k not in excluded_attrs}
+                urls = [v for k, v in full_attrs.items() if k in url_attrs and isinstance(v, str)]
+                element_data[node.element_id] = {
+                    'tag': tag,
+                    'attributes': full_attrs,
+                    'text_content': full_text,
+                    'xpath': node.xpath,
+                    'navigator_id': node.navigator_id,
+                    'is_interactive': node.is_interactive,
+                    'child_frame_id': node.child_frame_id,
+                    'urls': ','.join(urls) if urls else None,
+                }
+
             for child_id in node.children_ids:
-                _traverse_and_render(child_id, frame_id, depth + 1)
+                _traverse_and_render(child_id, depth + 1)
 
-        if node.child_frame_id is not None and node.child_frame_id in parsed_frames:
-            output_lines.append(
-                f"\n{indent}--- Start iFrame id={node.child_frame_id} ---")
-            child_frame_dom = parsed_frames[node.child_frame_id]
-            all_child_ids = {cid for n in child_frame_dom.values()
-                             for cid in n.children_ids}
-            root_node_ids = [
-                nid for nid in child_frame_dom if nid not in all_child_ids]
-            for root_id in root_node_ids:
-                _traverse_and_render(root_id, node.child_frame_id, depth + 1)
-            output_lines.append(
-                f"{indent}--- End iFrame id={node.child_frame_id} ---\n")
-
-    main_frame_dom = parsed_frames.get(main_frame_id, {})
-    if main_frame_dom:
-        all_child_ids = {cid for node in main_frame_dom.values()
-                         for cid in node.children_ids}
-        root_node_ids = [
-            nid for nid in main_frame_dom if nid not in all_child_ids]
         for root_id in root_node_ids:
-            _traverse_and_render(root_id, main_frame_id, 0)
+            _traverse_and_render(root_id, 0)
 
-    return "\n".join(output_lines), url_map
+        all_interactives = {nid for nid, node in frame_dom.items() if node.is_interactive}
+        missed = all_interactives - rendered_node_ids
+        for nid in sorted(missed):
+            node = frame_dom[nid]
+            tag = node.tag.lower()
+            navigator_str = f"navigator_id={node.navigator_id} " if node.navigator_id else ""
+            attributes_str = _format_attributes(node)
+            text = " ".join((node.text_content or "").split())[:interactive_text_limit]
+            description = f"{navigator_str}{attributes_str} text='{text}'".strip()
+            output_lines.append(f"[{tag} element id={node.element_id} {description}]")
+
+            full_attrs = {k: v for k, v in node.attributes.items() if k not in excluded_attrs}
+            urls = [v for k, v in full_attrs.items() if k in url_attrs and isinstance(v, str)]
+            element_data[node.element_id] = {
+                'tag': tag,
+                'attributes': full_attrs,
+                'text_content': node.text_content,
+                'xpath': node.xpath,
+                'navigator_id': node.navigator_id,
+                'is_interactive': node.is_interactive,
+                'child_frame_id': node.child_frame_id,
+                'urls': ','.join(urls) if urls else None,
+            }
+
+        optimized_dict[frame_id] = "\n".join(output_lines)
+
+    return optimized_dict, element_data, url_map

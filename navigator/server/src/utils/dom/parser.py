@@ -239,7 +239,7 @@ def parse_and_optimize_dom(
                 if not is_distinct_interaction(node):
                     node.is_interactive = False
 
-    optimized_string, url_map = advanced_dom_optimizer(
+    optimized_string, element_data, url_map = advanced_dom_optimizer(
         parsed_frames, detail_level)
 
 
