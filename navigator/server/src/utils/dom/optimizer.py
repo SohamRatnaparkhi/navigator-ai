@@ -176,7 +176,8 @@ def advanced_dom_optimizer(
         'span': ['role', 'aria-label', 'title', 'class', 'id'],
     }
 
-    excluded_attrs = {'style', 'width', 'height', 'bgcolor', 'color', 'align', 'valign', 'border', 'margin', 'padding', 'font-family', 'font-size', 'line-height', 'background', 'background-color', 'background-image', 'cursor', 'display', 'float', 'position', 'top', 'right', 'bottom', 'left', 'z-index', 'opacity', 'transform', 'transition', 'animation'}
+    excluded_attrs = {'style', 'width', 'height', 'bgcolor', 'color', 'align', 'valign', 'border', 'margin', 'padding', 'font-family', 'font-size', 'line-height', 'background', 'background-color', 'background-image', 'cursor', 'display', 'float', 'position', 'top', 'right', 'bottom', 'left', 'z-index', 'opacity', 'transform', 'transition', 'animation', 'px', 'py', 'mx', 'my', 'mt', 'mb', 'ml', 'mr', 'pt', 'pb', 'pl', 'pr', 'gap', 'flex', 'grid', 'hidden', 'visible', 'p-', 'm-', 'w-', 'h-', 'rounded', 'cursor', 'overflow', 'z-', 'opacity', 'absolute', 'relative', 'fixed', 'sticky', 'block', 'inline', 'justify', 'items', 'self', 'gap', 'col', 'row', 'md', 'lg', 'sm', 'xl', 'translate', 'right', 'left'}
+
     url_attrs = {'href', 'src', 'data-src', 'action'}
 
     def filter_classes(value) -> str:
