@@ -22,4 +22,8 @@ export interface DOMUpdate {
   iterationNumber?: number;
   openTabsWithIds?: Record<string, unknown>[];
   currentTab?: Record<string, unknown> | null;
+  // Optional context management fields
+  scratchpad?: string;
+  add_todo?: string;
+  mark_todo_done_index?: number;
 } 

@@ -180,7 +180,6 @@ async function handleCollectDomData(): Promise<any> {
                     const viableCandidates: HTMLElement[] = [];
                     const candidateElements = document.querySelectorAll(selector);
 
-                    // PASS 1: Filter and Tag viable candidates
                     candidateElements.forEach(el => {
                         if (!(el instanceof HTMLElement)) return;
 
@@ -205,18 +204,37 @@ async function handleCollectDomData(): Promise<any> {
                             if (!topElement || (!topElement.isSameNode(el) && !el.contains(topElement))) return;
                             
                             if (isDebugMode) {
-                                el.style.border = `2px solid ${getRandomColor()}`;
+                                const color = getRandomColor();
+                                el.style.border = `2px solid ${color}`;
                                 el.style.boxSizing = 'border-box';
+                                el.style.position = 'relative';
+                                
+                                // element ID label in bottom right corner
+                                const label = document.createElement('div');
+                                label.textContent = elementIdCounter.toString();
+                                label.style.position = 'absolute';
+                                label.style.bottom = '0';
+                                label.style.right = '0';
+                                label.style.fontSize = '8px';
+                                label.style.color = color;
+                                label.style.backgroundColor = 'rgba(255, 255, 255, 0.8)';
+                                label.style.padding = '1px 3px';
+                                label.style.borderRadius = '2px';
+                                label.style.pointerEvents = 'none';
+                                label.style.zIndex = '9999';
+                                label.style.fontFamily = 'monospace';
+                                el.appendChild(label);
                             }
 
                             const elementId = `nav-id-${elementIdCounter++}`;
                             el.setAttribute('data-navigator-id', elementId);
                             viableCandidates.push(el);
 
-                        } catch (e) { /* Ignore errors */ }
+                        } catch (e) { 
+                          console.error('Error processing element:', e);
+                        }
                     });
 
-                    // PASS 2: Analyze relationships now that all elements are tagged
                     viableCandidates.forEach(el => {
                         const elementId = el.getAttribute('data-navigator-id');
                         if (!elementId) return;
