@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from pydantic import BaseModel
 
 class CoTStep(BaseModel):
@@ -19,3 +19,45 @@ class CreateTaskResponse(BaseModel):
     task_id: str
     chain_of_thought: Optional[ChainOfThought]
     extra_data: Optional[Dict[str, str]] = {}  # For additional unknown fields 
+
+class ToolParameter(BaseModel):
+    name: str
+    type: str
+    description: str
+    required: bool = True
+    default: Optional[Any] = None
+
+class Tool(BaseModel):
+    tool_id: str
+    name: str
+    description: str
+    parameters: List[ToolParameter]
+    
+    class Config:
+        arbitrary_types_allowed = True
+
+
+class PlannedAction(BaseModel):
+    action: str
+    parameters: Dict[str, Any] | None = None
+
+
+class ExecutionResult(BaseModel):
+    status: str  # "success" | "error"
+    message: str
+    data: Optional[Dict[str, Any]] = None
+
+
+class ScratchpadUpdate(BaseModel):
+    mode: str  # 'append' | 'replace'
+    text: str
+
+
+class TodoAdd(BaseModel):
+    text: str
+    priority: int = 0
+
+
+class TodoChanges(BaseModel):
+    add: List[TodoAdd] = []
+    mark_done_indices: List[int] = []
