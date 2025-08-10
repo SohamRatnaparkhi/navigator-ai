@@ -94,12 +94,11 @@ export default function Panel() {
     setQuery("")
     setIsProcessing(true)
     
-    const url = window.location.href
     const tabs = await chrome.tabs.query({
       windowId: chrome.windows.WINDOW_ID_CURRENT,
     })
     const currentTab = tabs[0]
-    const openTabsWithIds = tabs.map((tab) => `${tab.id}`)
+    const openTabsWithIds = tabs.map((tab) => `Tab id: ${tab.id} - URL: ${tab.url} - Title: ${tab.title}`)
 
     if (mode === "agent") {
       try {
@@ -107,7 +106,7 @@ export default function Panel() {
 
         console.log(domData)
 
-        const { task_id, chain_of_thought = null } = await createTask(serverUrl, currentQuery, url, openTabsWithIds, `${currentTab.id}`)
+        const { task_id, chain_of_thought = null } = await createTask(serverUrl, currentQuery, currentTab.url || '', openTabsWithIds, `${currentTab.id}`)
 
         const taskMessage: Message = { type: "agent", text: `🆕 Task created with ID: ${task_id}` }
         const cotMessages: Message[] = chain_of_thought
