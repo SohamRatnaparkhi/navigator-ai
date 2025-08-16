@@ -51,6 +51,7 @@ def generate_chain_of_thought(query: str, url: str, openTabsWithIds: List[str], 
     content = get_coarse_plan_prompt(query, url, openTabsWithIds, currentTab)
 
     try:
+        token_usage: Optional[Dict[str, Any]] = None
         if provider == "gemini":
             client = get_gemini_client()
             if client is None:
@@ -62,12 +63,20 @@ def generate_chain_of_thought(query: str, url: str, openTabsWithIds: List[str], 
                 )
             ]
             cfg = build_gemini_generate_config(json_mime=True)
-            resp = client.models.generate_content(
+            response = client.models.generate_content(
                 model=model_name,
                 contents=contents,
                 config=cfg,
             )
-            text = getattr(resp, "text", None) or str(resp)
+            text = getattr(response, "text", None) or str(response)
+            # Best-effort token usage extraction for Gemini
+            usage_meta = getattr(response, "usage_metadata", None)
+            if usage_meta:
+                token_usage = {
+                    "input_tokens": getattr(usage_meta, "prompt_token_count", None),
+                    "output_tokens": getattr(usage_meta, "candidates_token_count", None),
+                    "total_tokens": getattr(usage_meta, "total_token_count", None),
+                }
         elif provider == "openai":
             client = get_openai_client()
             if client is None:
@@ -85,6 +94,13 @@ def generate_chain_of_thought(query: str, url: str, openTabsWithIds: List[str], 
             )
             r = client.chat.completions.create(**args)
             text = r.choices[0].message.content or "{}"
+            if getattr(r, "usage", None) is not None:
+                u = r.usage
+                token_usage = {
+                    "prompt_tokens": getattr(u, "prompt_tokens", None),
+                    "completion_tokens": getattr(u, "completion_tokens", None),
+                    "total_tokens": getattr(u, "total_tokens", None),
+                }
         else:  # groq
             client = get_groq_client()
             if client is None:
@@ -101,6 +117,23 @@ def generate_chain_of_thought(query: str, url: str, openTabsWithIds: List[str], 
             )
             r = client.chat.completions.create(**args)
             text = r.choices[0].message.content or "{}"
+            # Prefer native usage if available, fallback to raw response headers
+            if getattr(r, "usage", None) is not None:
+                u = r.usage
+                token_usage = {
+                    "prompt_tokens": getattr(u, "prompt_tokens", None),
+                    "completion_tokens": getattr(u, "completion_tokens", None),
+                    "total_tokens": getattr(u, "total_tokens", None),
+                }
+            else:
+                raw = getattr(r, "with_raw_response", None)
+                headers = getattr(raw, "headers", {}) if raw else {}
+                usage_hdr = headers.get("X-Usage-Info") if isinstance(headers, dict) else None
+                if usage_hdr:
+                    try:
+                        token_usage = json.loads(usage_hdr)
+                    except Exception:
+                        token_usage = {"raw": usage_hdr}
     except Exception:
         logger.exception("Coarse plan (chain of thought) call failed")
         # Fallback minimal response
@@ -114,11 +147,11 @@ def generate_chain_of_thought(query: str, url: str, openTabsWithIds: List[str], 
         data = json.loads(json_str)
         steps = [CoTStep(title=str(s.get("title", "")).strip(), description=str(s.get("description", "")).strip()) for s in data.get("steps", [])][:4]
         cot = ChainOfThought(title=str(data.get("title", "Plan")), steps=steps or [CoTStep(title="Start", description="Open the starting page and analyze UI.")])
-        return cot, {"provider": provider, "model": model_name, "token_usage": None}
+        return cot, {"provider": provider, "model": model_name, "token_usage": token_usage}
     except Exception:
         logger.exception("Failed to parse coarse plan JSON")
         cot = ChainOfThought(title="Plan", steps=[CoTStep(title="Start", description="Open the starting page and analyze UI.")])
-        return cot, {"provider": provider, "model": model_name, "token_usage": None}
+        return cot, {"provider": provider, "model": model_name, "token_usage": token_usage}
 
 
 logger = logging.getLogger(__name__)
@@ -166,6 +199,15 @@ async def plan_next_action(prompt: str) -> PlannedAction:
                 config=cfg,
             )
             text = getattr(response, "text", None) or str(response)
+            # Capture usage if available
+            usage_meta = getattr(response, "usage_metadata", None)
+            token_usage = None
+            if usage_meta:
+                token_usage = {
+                    "input_tokens": getattr(usage_meta, "prompt_token_count", None),
+                    "output_tokens": getattr(usage_meta, "candidates_token_count", None),
+                    "total_tokens": getattr(usage_meta, "total_token_count", None),
+                }
 
         elif provider == "openai":
             client = get_openai_client()
@@ -187,6 +229,14 @@ async def plan_next_action(prompt: str) -> PlannedAction:
             )
             resp = client.chat.completions.create(**args)
             text = resp.choices[0].message.content or "{}"
+            token_usage = None
+            if getattr(resp, "usage", None) is not None:
+                u = resp.usage
+                token_usage = {
+                    "prompt_tokens": getattr(u, "prompt_tokens", None),
+                    "completion_tokens": getattr(u, "completion_tokens", None),
+                    "total_tokens": getattr(u, "total_tokens", None),
+                }
 
         elif provider == "groq":
             client = get_groq_client()
@@ -204,6 +254,23 @@ async def plan_next_action(prompt: str) -> PlannedAction:
             )
             resp = client.chat.completions.create(**args)
             text = resp.choices[0].message.content or "{}"
+            token_usage = None
+            if getattr(resp, "usage", None) is not None:
+                u = resp.usage
+                token_usage = {
+                    "prompt_tokens": getattr(u, "prompt_tokens", None),
+                    "completion_tokens": getattr(u, "completion_tokens", None),
+                    "total_tokens": getattr(u, "total_tokens", None),
+                }
+            else:
+                raw = getattr(resp, "with_raw_response", None)
+                headers = getattr(raw, "headers", {}) if raw else {}
+                usage_hdr = headers.get("X-Usage-Info") if isinstance(headers, dict) else None
+                if usage_hdr:
+                    try:
+                        token_usage = json.loads(usage_hdr)
+                    except Exception:
+                        token_usage = {"raw": usage_hdr}
 
         else:
             raise RuntimeError(f"Unsupported LLM provider: {provider}")
@@ -223,7 +290,15 @@ async def plan_next_action(prompt: str) -> PlannedAction:
         logger.error(f"Failed to parse planner output as JSON: {text}")
         raise RuntimeError(f"Invalid planner output: {e}")
 
-    return PlannedAction(action=str(data.get("action", "")).strip(), parameters=data.get("parameters") or {})
+    planned = PlannedAction(
+        action=str(data.get("action", "")).strip(),
+        parameters=data.get("parameters") or {},
+        reasoning=str(data.get("reasoning", "")).strip() or None,
+        provider=provider,
+        model=model_name,
+        token_usage=locals().get("token_usage"),
+    )
+    return planned
 
 
 async def update_scratchpad_via_llm(context: str, current_scratchpad: str) -> ScratchpadUpdate:
@@ -232,6 +307,7 @@ async def update_scratchpad_via_llm(context: str, current_scratchpad: str) -> Sc
     model_name = COARSE_PLAN_MODEL
     prompt = get_scratchpad_update_prompt(context, current_scratchpad)
     try:
+        token_usage: Optional[Dict[str, Any]] = None
         if provider == "gemini":
             client = get_gemini_client()
             contents = [
@@ -247,6 +323,13 @@ async def update_scratchpad_via_llm(context: str, current_scratchpad: str) -> Sc
                 config=cfg,
             )
             text = getattr(response, "text", None) or str(response)
+            usage_meta = getattr(response, "usage_metadata", None)
+            if usage_meta:
+                token_usage = {
+                    "input_tokens": getattr(usage_meta, "prompt_token_count", None),
+                    "output_tokens": getattr(usage_meta, "candidates_token_count", None),
+                    "total_tokens": getattr(usage_meta, "total_token_count", None),
+                }
         elif provider == "openai":
             client = get_openai_client()
             messages = [
@@ -262,6 +345,13 @@ async def update_scratchpad_via_llm(context: str, current_scratchpad: str) -> Sc
             )
             resp = client.chat.completions.create(**args)
             text = resp.choices[0].message.content or "{}"
+            if getattr(resp, "usage", None) is not None:
+                u = resp.usage
+                token_usage = {
+                    "prompt_tokens": getattr(u, "prompt_tokens", None),
+                    "completion_tokens": getattr(u, "completion_tokens", None),
+                    "total_tokens": getattr(u, "total_tokens", None),
+                }
         else:  # groq
             client = get_groq_client()
             messages = [
@@ -276,11 +366,33 @@ async def update_scratchpad_via_llm(context: str, current_scratchpad: str) -> Sc
             )
             resp = client.chat.completions.create(**args)
             text = resp.choices[0].message.content or "{}"
+            if getattr(resp, "usage", None) is not None:
+                u = resp.usage
+                token_usage = {
+                    "prompt_tokens": getattr(u, "prompt_tokens", None),
+                    "completion_tokens": getattr(u, "completion_tokens", None),
+                    "total_tokens": getattr(u, "total_tokens", None),
+                }
+            else:
+                raw = getattr(resp, "with_raw_response", None)
+                headers = getattr(raw, "headers", {}) if raw else {}
+                usage_hdr = headers.get("X-Usage-Info") if isinstance(headers, dict) else None
+                if usage_hdr:
+                    try:
+                        token_usage = json.loads(usage_hdr)
+                    except Exception:
+                        token_usage = {"raw": usage_hdr}
         data = json.loads(text[text.find("{"): text.rfind("}") + 1])
         mode = str(data.get("mode", "append")).lower()
         if mode not in {"append", "replace"}:
             mode = "append"
-        return ScratchpadUpdate(mode=mode, text=str(data.get("text", "")).strip())
+        return ScratchpadUpdate(
+            mode=mode,
+            text=str(data.get("text", "")).strip(),
+            provider=provider,
+            model=model_name,
+            token_usage=token_usage,
+        )
     except Exception:
         logger.exception("Scratchpad LLM update failed")
         return ScratchpadUpdate(mode="append", text="")
@@ -292,6 +404,7 @@ async def update_todos_via_llm(context: str, current_todos: list[dict]) -> TodoC
     model_name = COARSE_PLAN_MODEL
     prompt = get_todo_update_prompt(context, current_todos)
     try:
+        token_usage: Optional[Dict[str, Any]] = None
         if provider == "gemini":
             client = get_gemini_client()
             contents = [
@@ -302,6 +415,13 @@ async def update_todos_via_llm(context: str, current_todos: list[dict]) -> TodoC
             ]
             response = client.models.generate_content(model=model_name, contents=contents)
             text = getattr(response, "text", None) or str(response)
+            usage_meta = getattr(response, "usage_metadata", None)
+            if usage_meta:
+                token_usage = {
+                    "input_tokens": getattr(usage_meta, "prompt_token_count", None),
+                    "output_tokens": getattr(usage_meta, "candidates_token_count", None),
+                    "total_tokens": getattr(usage_meta, "total_token_count", None),
+                }
         elif provider == "openai":
             client = get_openai_client()
             messages = [
@@ -316,6 +436,13 @@ async def update_todos_via_llm(context: str, current_todos: list[dict]) -> TodoC
             )
             resp = client.chat.completions.create(**args)
             text = resp.choices[0].message.content or "{}"
+            if getattr(resp, "usage", None) is not None:
+                u = resp.usage
+                token_usage = {
+                    "prompt_tokens": getattr(u, "prompt_tokens", None),
+                    "completion_tokens": getattr(u, "completion_tokens", None),
+                    "total_tokens": getattr(u, "total_tokens", None),
+                }
         else:
             client = get_groq_client()
             messages = [
@@ -329,10 +456,26 @@ async def update_todos_via_llm(context: str, current_todos: list[dict]) -> TodoC
             )
             resp = client.chat.completions.create(**args)
             text = resp.choices[0].message.content or "{}"
+            if getattr(resp, "usage", None) is not None:
+                u = resp.usage
+                token_usage = {
+                    "prompt_tokens": getattr(u, "prompt_tokens", None),
+                    "completion_tokens": getattr(u, "completion_tokens", None),
+                    "total_tokens": getattr(u, "total_tokens", None),
+                }
+            else:
+                raw = getattr(resp, "with_raw_response", None)
+                headers = getattr(raw, "headers", {}) if raw else {}
+                usage_hdr = headers.get("X-Usage-Info") if isinstance(headers, dict) else None
+                if usage_hdr:
+                    try:
+                        token_usage = json.loads(usage_hdr)
+                    except Exception:
+                        token_usage = {"raw": usage_hdr}
         data = json.loads(text[text.find("{"): text.rfind("}") + 1])
         add = [TodoAdd(**item) for item in data.get("add", [])] if isinstance(data.get("add", []), list) else []
         mark_done = [int(i) for i in data.get("mark_done_indices", [])]
-        return TodoChanges(add=add, mark_done_indices=mark_done)
+        return TodoChanges(add=add, mark_done_indices=mark_done, provider=provider, model=model_name, token_usage=token_usage)
     except Exception:
         logger.exception("Todo LLM update failed")
         return TodoChanges(add=[], mark_done_indices=[])

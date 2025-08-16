@@ -42,15 +42,13 @@ def _should_write_logs() -> bool:
     return str(flag).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
-def _get_logs_run_dir(task_id: str, action_history: List[Dict[str, Any]]) -> Path:
-    # Place logs under the server directory to keep them local to the service
-    server_dir = Path(__file__).resolve().parents[2]  # .../server
-    logs_root = server_dir / "logs"
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%fZ")
-    run_dir = logs_root / f"run_{timestamp}_{task_id}_{len(action_history or [])}"
-    run_dir.mkdir(parents=True, exist_ok=True)
-
-    return run_dir
+def _get_logs_run_dir(task_id: str, step_index: int) -> Path:
+    # Place logs under server/logs/<task_id>/step_XXX
+    server_dir = Path(__file__).resolve().parents[2]
+    logs_root = server_dir / "logs" / task_id
+    step_dir = logs_root / f"step_{step_index:03d}"
+    step_dir.mkdir(parents=True, exist_ok=True)
+    return step_dir
 
 
 def _safe_write_text(path: Path, content: str) -> None:
@@ -381,13 +379,11 @@ async def run_agent_loop(task_id: str, dom_data: FullDOMData, max_steps: int = 2
     logs_run_dir: Optional[Path] = None
     if _should_write_logs():
         try:
-            logs_run_dir = _get_logs_run_dir(task_id, action_history)
-            
-            _safe_write_text(logs_run_dir / "01_optimized_dom/optimized_dom.txt", optimized_dom_string)
-            _safe_write_json(logs_run_dir / "02_url_map/url_map.json", url_map)
-            _safe_write_json(logs_run_dir / "03_element_map/element_map.json", element_map)
+            logs_run_dir = _get_logs_run_dir(task_id, len(action_history or []))
+            _safe_write_text(logs_run_dir / "optimized_dom.txt", optimized_dom_string)
+            _safe_write_json(logs_run_dir / "url_map.json", url_map)
+            _safe_write_json(logs_run_dir / "element_map.json", element_map)
 
-            
             serializable_frames: Dict[str, Dict[str, Any]] = {}
             for frame_id, nodes in (parsed_frames or {}).items():
                 frame_key = str(frame_id)
@@ -396,7 +392,7 @@ async def run_agent_loop(task_id: str, dom_data: FullDOMData, max_steps: int = 2
                     serializable_frames[frame_key][str(node_id)] = (
                         node.model_dump() if hasattr(node, "model_dump") else getattr(node, "dict", lambda: {} )()
                     )
-            _safe_write_json(logs_run_dir / "04_parsed_frames/parsed_frames.json", serializable_frames)
+            _safe_write_json(logs_run_dir / "parsed_frames.json", serializable_frames)
         except Exception:
             logger.exception("Failed writing perception logs")
 
@@ -413,7 +409,7 @@ async def run_agent_loop(task_id: str, dom_data: FullDOMData, max_steps: int = 2
     else:
         if logs_run_dir is not None:
             try:
-                _safe_write_json(logs_run_dir / "05_planned_action/planned_action.json", planned_action.model_dump())
+                _safe_write_json(logs_run_dir / "planned_action.json", planned_action.model_dump())
             except Exception:
                 logger.exception("Failed writing planned action log")
 
@@ -427,7 +423,7 @@ async def run_agent_loop(task_id: str, dom_data: FullDOMData, max_steps: int = 2
     finally:
         if logs_run_dir is not None:
             try:
-                _safe_write_json(logs_run_dir / "06_execution_result/execution_result.json", exec_result.model_dump())
+                _safe_write_json(logs_run_dir / "execution_result.json", exec_result.model_dump())
             except Exception:
                 logger.exception("Failed writing execution result log")
 
@@ -522,7 +518,7 @@ async def run_agent_loop(task_id: str, dom_data: FullDOMData, max_steps: int = 2
     # Final output log
     if logs_run_dir is not None:
         try:
-            _safe_write_json(logs_run_dir / "07_final_out/final_out.json", out)
+            _safe_write_json(logs_run_dir / "final_out.json", out)
         except Exception:
             logger.exception("Failed writing final out log")
     return out
