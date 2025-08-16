@@ -39,3 +39,30 @@ export async function updateTaskDom(serverUrl: string, payload: DOMUpdate): Prom
     throw new Error("Unexpected response type");
   }
 } 
+
+export async function updateTaskAndGetPlan(serverUrl: string, payload: DOMUpdate & { task_id: string }): Promise<any> {
+  const response = await sendMessageToBackground({
+    type: "UPDATE_TASK_AND_GET_PLAN",
+    payload: {
+      serverUrl,
+      task_id: payload.task_id,
+      dom_data: payload.dom_data,
+      iterationNumber: payload.iterationNumber ?? 0,
+      openTabsWithIds: payload.openTabsWithIds ?? [],
+      currentTab: payload.currentTab ?? null,
+      scratchpad: (payload as any).scratchpad,
+      add_todo: (payload as any).add_todo,
+      mark_todo_done_index: (payload as any).mark_todo_done_index,
+    }
+  });
+
+  if (response.type === "UPDATE_TASK_AND_GET_PLAN_RESPONSE") {
+    if (response.payload.success) {
+      return response.payload.data;
+    } else {
+      throw new Error(response.payload.error || "Failed to update task (get plan)");
+    }
+  }
+
+  throw new Error("Unexpected response type");
+}

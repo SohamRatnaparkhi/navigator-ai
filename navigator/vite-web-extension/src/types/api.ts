@@ -20,7 +20,7 @@ export interface DOMUpdate {
   task_id: string;
   dom_data: DOMData;
   iterationNumber?: number;
-  openTabsWithIds?: Record<string, unknown>[];
+  openTabsWithIds?: string[];
   currentTab?: Record<string, unknown> | null;
   // Optional context management fields
   scratchpad?: string;

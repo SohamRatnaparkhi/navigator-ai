@@ -7,8 +7,7 @@ import ChatMessages from "./ChatMessages"
 import InputArea from "./InputArea"
 import Settings from "./Settings"
 
-import { collectDOMData } from "../../utils/dom"
-import { createTask, updateTaskDom } from "../../utils/api"
+import { runAgentLoop } from "../../services/agent-loop"
 import type { Message } from "../../types"
 
 const llms = [
@@ -94,42 +93,12 @@ export default function Panel() {
     setQuery("")
     setIsProcessing(true)
     
-    const tabs = await chrome.tabs.query({
-      windowId: chrome.windows.WINDOW_ID_CURRENT,
-    })
-    const currentTab = tabs[0]
-    const openTabsWithIds = tabs.map((tab) => `Tab id: ${tab.id} - URL: ${tab.url} - Title: ${tab.title}`)
-
     if (mode === "agent") {
       try {
-        const domData = await collectDOMData()
-
-        console.log(domData)
-
-        const { task_id, chain_of_thought = null } = await createTask(serverUrl, currentQuery, currentTab.url || '', openTabsWithIds, `${currentTab.id}`)
-
-        const taskMessage: Message = { type: "agent", text: `🆕 Task created with ID: ${task_id}` }
-        const cotMessages: Message[] = chain_of_thought
-          ? [{ type: "cot", cot: chain_of_thought }]
-          : []
-        setMessages((prev) => [...prev, taskMessage, ...cotMessages])
-
-        await updateTaskDom(serverUrl, {
-          task_id,
-          dom_data: domData,
-          iterationNumber: 0,
-          openTabsWithIds: [],
-          currentTab: currentTab ? { id: currentTab.id, url: currentTab.url } : null,
-        })
-
-        setMessages((prev) => [
-          ...prev,
-          { type: "agent", text: `🌐 DOM snapshot sent for task ${task_id}.` },
-        ])
+        await runAgentLoop(currentQuery, setMessages, setIsProcessing)
       } catch (err: any) {
         const errorMsg = err?.message || "An unexpected error occurred."
         setMessages((prev) => [...prev, { type: "agent", text: `❌ ${errorMsg}` }])
-      } finally {
         setIsProcessing(false)
       }
     } else {

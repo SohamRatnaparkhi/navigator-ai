@@ -1,5 +1,5 @@
 import Browser from 'webextension-polyfill';
-import type { BackgroundMessage, ContentMessage, CreateTaskMessage, UpdateTaskMessage, DOMData } from '../../types';
+import type { BackgroundMessage, ContentMessage, CreateTaskMessage, UpdateTaskMessage } from '../../types';
 import { isValidUrl } from '../../utils/dom';
 
 console.log('background script loaded');
@@ -46,6 +46,16 @@ chrome.runtime.onMessage.addListener((message: BackgroundMessage, sender, sendRe
       .then((response) => sendResponse(response))
       .catch((error) => sendResponse({
         type: 'UPDATE_TASK_RESPONSE',
+        payload: { success: false, error: error.message }
+      }))
+    return true
+  }
+
+  if (message.type === 'UPDATE_TASK_AND_GET_PLAN') {
+    handleUpdateTaskAndGetPlan(message)
+      .then((response) => sendResponse(response))
+      .catch((error) => sendResponse({
+        type: 'UPDATE_TASK_AND_GET_PLAN_RESPONSE',
         payload: { success: false, error: error.message }
       }))
     return true
@@ -143,11 +153,70 @@ async function handleUpdateTask(message: UpdateTaskMessage): Promise<ContentMess
   }
 }
 
+async function handleUpdateTaskAndGetPlan(message: any): Promise<ContentMessage> {
+  const { serverUrl, task_id, dom_data, iterationNumber, openTabsWithIds, currentTab, scratchpad, add_todo, mark_todo_done_index } = message.payload;
+
+  try {
+    const response = await fetch(`${serverUrl.replace(/\/$/, '')}/tasks/update`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        task_id,
+        dom_data,
+        iterationNumber: iterationNumber ?? 0,
+        openTabsWithIds: openTabsWithIds ?? [],
+        currentTab: currentTab ?? null,
+        scratchpad,
+        add_todo,
+        mark_todo_done_index
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to update task – ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    return {
+      type: 'UPDATE_TASK_AND_GET_PLAN_RESPONSE',
+      payload: { success: true, data }
+    };
+  } catch (error: any) {
+    return {
+      type: 'UPDATE_TASK_AND_GET_PLAN_RESPONSE',
+      payload: {
+        success: false,
+        error: error.message
+      }
+    };
+  }
+}
+
 async function handleCollectDomData(): Promise<any> {
     console.log('AGENT: Collecting DOM data with expanded viewport...');
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    let [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab || !tab.id) {
-        throw new Error('No active tab found');
+        let retryCount = 0;
+        const maxRetries = 10;
+        
+        while (retryCount < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 100));
+            
+            const [retryTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (retryTab && retryTab.id) {
+                tab = retryTab;
+                break;
+            }
+            console.log(`Retry attempt ${retryCount + 1}/${maxRetries}: No active tab found, waiting 2 seconds...`);
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            retryCount++;
+        }
+        
+        if (!tab || !tab.id) {
+            throw new Error('No active tab found after 10 retries');
+        }
     }
     const tabId = tab.id;
 

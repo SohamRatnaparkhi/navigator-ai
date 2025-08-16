@@ -44,6 +44,30 @@ export interface UpdateTaskResponse {
   };
 }
 
+export interface UpdateTaskAndGetPlanMessage {
+  type: "UPDATE_TASK_AND_GET_PLAN";
+  payload: {
+    serverUrl: string;
+    task_id: string;
+    dom_data: DOMData;
+    iterationNumber?: number;
+    openTabsWithIds?: Record<string, unknown>[];
+    currentTab?: Record<string, unknown> | null;
+    scratchpad?: string;
+    add_todo?: string;
+    mark_todo_done_index?: number;
+  };
+}
+
+export interface UpdateTaskAndGetPlanResponse {
+  type: "UPDATE_TASK_AND_GET_PLAN_RESPONSE";
+  payload: {
+    success: boolean;
+    data?: any;
+    error?: string;
+  };
+}
+
 export interface CollectDomDataMessage {
   type: "COLLECT_DOM_DATA";
 }
@@ -57,5 +81,5 @@ export interface CollectDomDataResponse {
   };
 }
 
-export type BackgroundMessage = CreateTaskMessage | UpdateTaskMessage | CollectDomDataMessage;
-export type ContentMessage = CreateTaskResponse | UpdateTaskResponse | CollectDomDataResponse; 
+export type BackgroundMessage = CreateTaskMessage | UpdateTaskMessage | UpdateTaskAndGetPlanMessage | CollectDomDataMessage;
+export type ContentMessage = CreateTaskResponse | UpdateTaskResponse | UpdateTaskAndGetPlanResponse | CollectDomDataResponse; 
