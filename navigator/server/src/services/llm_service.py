@@ -149,9 +149,6 @@ async def plan_next_action(prompt: str) -> PlannedAction:
         if provider == "gemini":
             client = get_gemini_client()
 
-            with open(f"prompt_{int(time.time())}.txt", "w") as f:
-                f.write(prompt)
-
             if client is None:
                 raise RuntimeError("Gemini client not configured")
             contents = [

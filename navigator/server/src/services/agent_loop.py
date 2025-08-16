@@ -1,8 +1,10 @@
 import asyncio
 import json
 import logging
+import os
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.api.schemas.dom import DOMTagNode, FullDOMData
@@ -33,7 +35,41 @@ from src.utils.prompts.planner_prompt import get_planner_prompt
 logger = logging.getLogger(__name__)
 
 
-def create_word_batches(text: str, words_per_batch: int = 2000, padding_words: int = 250) -> List[str]:
+def _should_write_logs() -> bool:
+    flag = os.getenv("WRITE_LOGS") or os.getenv("write_logs")
+    if flag is None:
+        return False
+    return str(flag).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _get_logs_run_dir(task_id: str, action_history: List[Dict[str, Any]]) -> Path:
+    # Place logs under the server directory to keep them local to the service
+    server_dir = Path(__file__).resolve().parents[2]  # .../server
+    logs_root = server_dir / "logs"
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%fZ")
+    run_dir = logs_root / f"run_{timestamp}_{task_id}_{len(action_history or [])}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    return run_dir
+
+
+def _safe_write_text(path: Path, content: str) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    except Exception:
+        logger.exception("Failed writing text log: %s", path)
+
+
+def _safe_write_json(path: Path, data: Any) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        logger.exception("Failed writing json log: %s", path)
+
+
+def create_word_batches(text: str, words_per_batch: int = 4000, padding_words: int = 250) -> List[str]:
     """
     Split text into word-based batches with padding for context.
     
@@ -337,10 +373,33 @@ async def run_agent_loop(task_id: str, dom_data: FullDOMData, max_steps: int = 2
     """
     # Perceive
     optimized_dom_string, url_map, element_map, parsed_frames = parse_and_optimize_dom(dom_data)
-
     # Plan
     user_goal = await get_task_goal(task_id)
     action_history = await get_action_history(task_id)
+
+    # Optional step-based file logging
+    logs_run_dir: Optional[Path] = None
+    if _should_write_logs():
+        try:
+            logs_run_dir = _get_logs_run_dir(task_id, action_history)
+            
+            _safe_write_text(logs_run_dir / "01_optimized_dom/optimized_dom.txt", optimized_dom_string)
+            _safe_write_json(logs_run_dir / "02_url_map/url_map.json", url_map)
+            _safe_write_json(logs_run_dir / "03_element_map/element_map.json", element_map)
+
+            
+            serializable_frames: Dict[str, Dict[str, Any]] = {}
+            for frame_id, nodes in (parsed_frames or {}).items():
+                frame_key = str(frame_id)
+                serializable_frames[frame_key] = {}
+                for node_id, node in (nodes or {}).items():
+                    serializable_frames[frame_key][str(node_id)] = (
+                        node.model_dump() if hasattr(node, "model_dump") else getattr(node, "dict", lambda: {} )()
+                    )
+            _safe_write_json(logs_run_dir / "04_parsed_frames/parsed_frames.json", serializable_frames)
+        except Exception:
+            logger.exception("Failed writing perception logs")
+
     try:
         planned_action, selected_batch_index = await _plan_next_action(
             task_id=task_id,
@@ -351,6 +410,12 @@ async def run_agent_loop(task_id: str, dom_data: FullDOMData, max_steps: int = 2
     except Exception as e:
         logger.exception("Planner failed")
         return ExecutionResult(status="error", message=f"Planner error: {e}").model_dump()
+    else:
+        if logs_run_dir is not None:
+            try:
+                _safe_write_json(logs_run_dir / "05_planned_action/planned_action.json", planned_action.model_dump())
+            except Exception:
+                logger.exception("Failed writing planned action log")
 
     # Execute
     executor = Executor(parsed_dom_frames=parsed_frames)
@@ -359,6 +424,12 @@ async def run_agent_loop(task_id: str, dom_data: FullDOMData, max_steps: int = 2
     except Exception as e:
         logger.exception("Executor failed")
         exec_result = ExecutionResult(status="error", message=f"Execution error: {e}")
+    finally:
+        if logs_run_dir is not None:
+            try:
+                _safe_write_json(logs_run_dir / "06_execution_result/execution_result.json", exec_result.model_dump())
+            except Exception:
+                logger.exception("Failed writing execution result log")
 
     try:
         dom_batches = create_word_batches(optimized_dom_string, words_per_batch=2000, padding_words=250)
@@ -422,6 +493,13 @@ async def run_agent_loop(task_id: str, dom_data: FullDOMData, max_steps: int = 2
                 "element_id": element_id,
                 **{k: v for k, v in element_map[element_id].items() if k in {"xpath", "tag", "attributes"}},
             }
+    
+    # Final output log
+    if logs_run_dir is not None:
+        try:
+            _safe_write_json(logs_run_dir / "07_final_out/final_out.json", out)
+        except Exception:
+            logger.exception("Failed writing final out log")
     return out
 
 
