@@ -4,6 +4,62 @@ import { isValidUrl } from '../../utils/dom';
 
 console.log('background script loaded');
 
+// Track last known active tab and window to improve tab resolution when the side panel is focused
+let lastKnownActiveTabId: number | null = null;
+let lastKnownWindowId: number | null = null;
+
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+  try {
+    lastKnownActiveTabId = activeInfo.tabId;
+    lastKnownWindowId = activeInfo.windowId;
+  } catch (_) {}
+});
+
+chrome.windows.onFocusChanged.addListener(async (windowId) => {
+  if (windowId && windowId !== chrome.windows.WINDOW_ID_NONE) {
+    lastKnownWindowId = windowId;
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, windowId });
+      if (tab && tab.id) lastKnownActiveTabId = tab.id;
+    } catch (_) {}
+  }
+});
+
+async function resolveActiveTab(): Promise<chrome.tabs.Tab | null> {
+  // 1) Try the truly active tab of the last focused window
+  const [tabInFocused] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (tabInFocused && tabInFocused.id) return tabInFocused;
+
+  // 2) Try currentWindow (sometimes works depending on panel context)
+  const [tabInCurrent] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tabInCurrent && tabInCurrent.id) return tabInCurrent;
+
+  // 3) Try last known window id
+  if (lastKnownWindowId != null) {
+    const [tabInKnownWindow] = await chrome.tabs.query({ active: true, windowId: lastKnownWindowId });
+    if (tabInKnownWindow && tabInKnownWindow.id) return tabInKnownWindow;
+  }
+
+  // 4) Try last known active tab id
+  if (lastKnownActiveTabId != null) {
+    try {
+      const tab = await chrome.tabs.get(lastKnownActiveTabId);
+      if (tab && tab.id) return tab;
+    } catch (_) {}
+  }
+
+  // 5) Fallback: choose a plausible normal tab
+  const allNormalWindows = await chrome.windows.getAll({ populate: true, windowTypes: ["normal"] as any });
+  for (const win of allNormalWindows) {
+    const tabs = (win as any).tabs as chrome.tabs.Tab[] | undefined;
+    if (!tabs) continue;
+    const candidate = tabs.find(t => !!t.id && !!t.url && isValidUrl(t.url!));
+    if (candidate) return candidate;
+  }
+
+  return null;
+}
+
 Browser.runtime.onInstalled.addListener(async () => {
   // @ts-ignore
   if (Browser.sidePanel) {
@@ -196,27 +252,23 @@ async function handleUpdateTaskAndGetPlan(message: any): Promise<ContentMessage>
 
 async function handleCollectDomData(): Promise<any> {
     console.log('AGENT: Collecting DOM data with expanded viewport...');
-    let [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    let tab: chrome.tabs.Tab | null = await resolveActiveTab();
+    let retryCount = 0;
+    const maxRetries = 5;
+
+    while ((!tab || !tab.id) && retryCount < maxRetries) {
+      await new Promise(resolve => setTimeout(resolve, 200 + retryCount * 200));
+      tab = await resolveActiveTab();
+      retryCount++;
+    }
+
     if (!tab || !tab.id) {
-        let retryCount = 0;
-        const maxRetries = 10;
-        
-        while (retryCount < maxRetries) {
-            await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 100));
-            
-            const [retryTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-            if (retryTab && retryTab.id) {
-                tab = retryTab;
-                break;
-            }
-            console.log(`Retry attempt ${retryCount + 1}/${maxRetries}: No active tab found, waiting 2 seconds...`);
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            retryCount++;
-        }
-        
-        if (!tab || !tab.id) {
-            throw new Error('No active tab found after 10 retries');
-        }
+      throw new Error('No active tab available. Focus a normal webpage and try again.');
+    }
+
+    // Avoid trying to inject into restricted schemes
+    if (!tab.url || !isValidUrl(tab.url)) {
+      throw new Error('Active tab is not a standard webpage (chrome://, extensions, etc). Please switch to a normal page.');
     }
     const tabId = tab.id;
 
@@ -297,6 +349,9 @@ async function handleCollectDomData(): Promise<any> {
 
                             const elementId = `nav-id-${elementIdCounter++}`;
                             el.setAttribute('data-navigator-id', elementId);
+                            if (isDebugMode) {
+                                el.classList.add('nav-debug');
+                            }
                             viableCandidates.push(el);
 
                         } catch (e) { 

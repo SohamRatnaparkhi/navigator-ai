@@ -31,7 +31,7 @@ export interface UpdateTaskMessage {
     task_id: string;
     dom_data: DOMData;
     iterationNumber?: number;
-    openTabsWithIds?: Record<string, unknown>[];
+    openTabsWithIds?: string[];
     currentTab?: Record<string, unknown> | null;
   };
 }
@@ -51,7 +51,7 @@ export interface UpdateTaskAndGetPlanMessage {
     task_id: string;
     dom_data: DOMData;
     iterationNumber?: number;
-    openTabsWithIds?: Record<string, unknown>[];
+    openTabsWithIds?: string[];
     currentTab?: Record<string, unknown> | null;
     scratchpad?: string;
     add_todo?: string;

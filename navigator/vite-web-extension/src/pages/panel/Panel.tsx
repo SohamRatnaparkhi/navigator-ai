@@ -7,7 +7,7 @@ import ChatMessages from "./ChatMessages"
 import InputArea from "./InputArea"
 import Settings from "./Settings"
 
-import { runAgentLoop } from "../../services/agent-loop"
+import { runAgentLoop, cancelAgentLoop } from "../../services/agent-loop"
 import type { Message } from "../../types"
 
 const llms = [
@@ -53,7 +53,9 @@ export default function Panel() {
   }
 
   const handleNewAgent = () => {
+    cancelAgentLoop()
     setMessages([])
+    setQuery("")
     setIsProcessing(false)
   }
 
@@ -80,13 +82,14 @@ export default function Panel() {
   }
 
   const handleQuerySubmit = async () => {
-    if (!query.trim()) return
-
-    // Allow stopping the current processing if user submits while processing
     if (isProcessing) {
+      cancelAgentLoop()
       setIsProcessing(false)
+      setMessages((prev) => [...prev, { type: "agent", text: "🛑 Agent stopped by user." }])
       return
     }
+
+    if (!query.trim()) return
 
     const currentQuery = query.trim()
     setMessages((prev) => [...prev, { type: "user", text: currentQuery }])
@@ -95,8 +98,14 @@ export default function Panel() {
     
     if (mode === "agent") {
       try {
+        // Validate browser environment before starting
+        if (!chrome?.tabs) {
+          throw new Error("Browser extension API not available. Please refresh the extension.")
+        }
+        
         await runAgentLoop(currentQuery, setMessages, setIsProcessing)
       } catch (err: any) {
+        console.error("[PANEL] Agent loop error:", err)
         const errorMsg = err?.message || "An unexpected error occurred."
         setMessages((prev) => [...prev, { type: "agent", text: `❌ ${errorMsg}` }])
         setIsProcessing(false)
