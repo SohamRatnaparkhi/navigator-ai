@@ -430,7 +430,7 @@ function normalizeAction(input: any): any {
 		go_back: "go_back", GO_BACK: "go_back", back: "go_back",
 		go_forward: "go_forward", GO_FORWARD: "go_forward", forward: "go_forward",
 		refresh_page: "refresh_page", REFRESH_PAGE: "refresh_page", reload: "refresh_page", refresh: "refresh_page",
-		TASK_COMPLETE: "TASK_COMPLETE",
+		TASK_COMPLETE: "TASK_COMPLETE", task_complete: "TASK_COMPLETE",
 		TASK_FAILED: "TASK_FAILED",
 	};
 	return {

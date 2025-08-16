@@ -53,15 +53,16 @@ Plan: Briefly state your plan. (e.g., "The 'Submit' button is visible, I will cl
 Select Tool: Based on your plan, choose the single best tool.
 
 Output Format:
-You MUST respond with a single, valid JSON object representing your chosen action. Do not include any other text, explanations, or markdown formatting.
+You MUST respond with a single, valid JSON object representing your chosen action. Do not include any other text, explanations, or markdown formatting. Include a brief 'reasoning' string explaining why this action is the best next step.
 
 Example Response:
 {{
-"action": "click",
-"parameters": {{
-"element_id": 123,
-"frame_id": 0
-  }}
+  "action": "click",
+  "parameters": {{
+    "element_id": 123,
+    "frame_id": 0
+  }},
+  "reasoning": "The 'Submit' button is visible and matches the goal to submit the form."
 }}
 """
 

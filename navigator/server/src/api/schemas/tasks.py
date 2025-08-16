@@ -18,7 +18,10 @@ class CreateTaskRequest(BaseModel):
 class CreateTaskResponse(BaseModel):
     task_id: str
     chain_of_thought: Optional[ChainOfThought]
-    extra_data: Optional[Dict[str, str]] = {}  # For additional unknown fields 
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    token_usage: Optional[Dict[str, Any]] = None
+    extra_data: Optional[Dict[str, Any]] = {}  # For additional unknown fields 
 
 class ToolParameter(BaseModel):
     name: str
@@ -40,6 +43,10 @@ class Tool(BaseModel):
 class PlannedAction(BaseModel):
     action: str
     parameters: Dict[str, Any] | None = None
+    reasoning: Optional[str] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    token_usage: Optional[Dict[str, Any]] = None
 
 
 class ExecutionResult(BaseModel):
@@ -51,6 +58,9 @@ class ExecutionResult(BaseModel):
 class ScratchpadUpdate(BaseModel):
     mode: str  # 'append' | 'replace'
     text: str
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    token_usage: Optional[Dict[str, Any]] = None
 
 
 class TodoAdd(BaseModel):
@@ -61,3 +71,6 @@ class TodoAdd(BaseModel):
 class TodoChanges(BaseModel):
     add: List[TodoAdd] = []
     mark_done_indices: List[int] = []
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    token_usage: Optional[Dict[str, Any]] = None

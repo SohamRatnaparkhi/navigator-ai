@@ -431,6 +431,15 @@ async def run_agent_loop(task_id: str, dom_data: FullDOMData, max_steps: int = 2
             except Exception:
                 logger.exception("Failed writing execution result log")
 
+    # Persist planner reasoning to scratchpad (concise)
+    try:
+        if getattr(planned_action, "reasoning", None):
+            concise_reason = str(planned_action.reasoning).strip()
+            if concise_reason:
+                await append_scratchpad(task_id, f"Planner reasoning: {concise_reason}")
+    except Exception:
+        logger.exception("Failed appending planner reasoning to scratchpad")
+
     try:
         dom_batches = create_word_batches(optimized_dom_string, words_per_batch=2000, padding_words=250)
         context_str = (
@@ -481,6 +490,22 @@ async def run_agent_loop(task_id: str, dom_data: FullDOMData, max_steps: int = 2
         "planned_action": planned_action.model_dump(),
         "execution_result": exec_result.model_dump(),
     }
+    # Include token usage and provider/model info for memory updates
+    try:
+        if 'sp_update' in locals() and sp_update:
+            out.setdefault("memory_updates", {})["scratchpad"] = {
+                "provider": getattr(sp_update, "provider", None),
+                "model": getattr(sp_update, "model", None),
+                "token_usage": getattr(sp_update, "token_usage", None),
+            }
+        if 'td_update' in locals() and td_update:
+            out.setdefault("memory_updates", {})["todos"] = {
+                "provider": getattr(td_update, "provider", None),
+                "model": getattr(td_update, "model", None),
+                "token_usage": getattr(td_update, "token_usage", None),
+            }
+    except Exception:
+        logger.exception("Failed to attach memory update metadata to output")
     cmd = (exec_result.data or {}).get("browser_command") if exec_result.data else None
     if isinstance(cmd, dict):
         cmd = replace_url_in_command(cmd, url_map)

@@ -1,7 +1,6 @@
 import json
 import logging
-import time
-from typing import List, Optional
+from typing import List, Optional, Tuple, Dict, Any
 from src.api.schemas.tasks import ChainOfThought, CoTStep, PlannedAction, ScratchpadUpdate, TodoChanges, TodoAdd
 from src.config import LLM_PROVIDER, PLANNER_MODEL, COARSE_PLAN_MODEL
 from src.utils.llm_clients import get_gemini_client, get_openai_client, get_groq_client
@@ -14,7 +13,7 @@ from src.services.model_configs import (
     build_groq_chat_args,
 )
 
-def generate_chain_of_thought(query: str, url: str, openTabsWithIds: List[str], currentTab: str) -> Optional[ChainOfThought]:
+def generate_chain_of_thought(query: str, url: str, openTabsWithIds: List[str], currentTab: str) -> Tuple[Optional[ChainOfThought], Dict[str, Any]]:
     """Cheap, brief plan preview for the first request.
 
     Uses a cheaper model (COARSE_PLAN_MODEL if provided) and requests a short structured JSON:
@@ -105,7 +104,8 @@ def generate_chain_of_thought(query: str, url: str, openTabsWithIds: List[str], 
     except Exception:
         logger.exception("Coarse plan (chain of thought) call failed")
         # Fallback minimal response
-        return ChainOfThought(title="Plan", steps=[CoTStep(title="Start", description="Begin at the provided URL.")])
+        cot = ChainOfThought(title="Plan", steps=[CoTStep(title="Start", description="Begin at the provided URL.")])
+        return cot, {"provider": provider, "model": model_name, "token_usage": None}
 
     try:
         obj_start = text.find("{")
@@ -113,10 +113,12 @@ def generate_chain_of_thought(query: str, url: str, openTabsWithIds: List[str], 
         json_str = text[obj_start: obj_end + 1] if obj_start != -1 and obj_end != -1 else text
         data = json.loads(json_str)
         steps = [CoTStep(title=str(s.get("title", "")).strip(), description=str(s.get("description", "")).strip()) for s in data.get("steps", [])][:4]
-        return ChainOfThought(title=str(data.get("title", "Plan")), steps=steps or [CoTStep(title="Start", description="Open the starting page and analyze UI.")])
+        cot = ChainOfThought(title=str(data.get("title", "Plan")), steps=steps or [CoTStep(title="Start", description="Open the starting page and analyze UI.")])
+        return cot, {"provider": provider, "model": model_name, "token_usage": None}
     except Exception:
         logger.exception("Failed to parse coarse plan JSON")
-        return ChainOfThought(title="Plan", steps=[CoTStep(title="Start", description="Open the starting page and analyze UI.")])
+        cot = ChainOfThought(title="Plan", steps=[CoTStep(title="Start", description="Open the starting page and analyze UI.")])
+        return cot, {"provider": provider, "model": model_name, "token_usage": None}
 
 
 logger = logging.getLogger(__name__)

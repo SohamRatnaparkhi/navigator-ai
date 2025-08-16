@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 async def create_task(request: CreateTaskRequest = Body(...)) -> CreateTaskResponse:
     task_id = str(uuid.uuid4())
     logger.info(f"Task {task_id} created and stored in Redis")
-    cot = generate_chain_of_thought(request.task, request.url, request.openTabsWithIds, request.currentTab)
+    cot, meta = generate_chain_of_thought(request.task, request.url, request.openTabsWithIds, request.currentTab)
     key = f"task:{task_id}"
     # Store a richer state so planner can read the goal later
     value = {
@@ -32,7 +32,13 @@ async def create_task(request: CreateTaskRequest = Body(...)) -> CreateTaskRespo
     }
 
     await redis_client.set(key, __import__("json").dumps(value))
-    return CreateTaskResponse(task_id=task_id, chain_of_thought=cot)
+    return CreateTaskResponse(
+        task_id=task_id,
+        chain_of_thought=cot,
+        provider=meta.get("provider"),
+        model=meta.get("model"),
+        token_usage=meta.get("token_usage"),
+    )
 
 @router.post("/update")
 async def update_task(update_data: Dict[str, Any] = Body(...)):
