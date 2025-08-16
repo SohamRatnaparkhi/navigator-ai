@@ -176,10 +176,82 @@ export async function runAgentLoop(
 			// STEP 4: Execute the action
 			setMessages((prev) => [...prev, { type: "agent", text: describeAction(action) }]);
 
-			const execResult = await executeActionSafely(currentTabState.activeTab.id, action, iteration, setMessages);
+			// New: recovery loop that re-collects DOM and re-plans up to 4 times on failures
+			const MAX_RECOVERY_ATTEMPTS = 4;
+			let recoveryAttempt = 0;
+			let execResult: any = { success: false, message: "" };
+			let nextAction = action;
+
+			while (recoveryAttempt <= MAX_RECOVERY_ATTEMPTS) {
+				if (shouldStop()) {
+					setMessages((prev) => [...prev, { type: "agent", text: "⏹️ Stopped." }]);
+					break;
+				}
+
+				// Execute current planned action
+				execResult = await executeActionSafely(currentTabState.activeTab.id, nextAction, iteration, setMessages);
+				console.log(`[AGENT-LOOP] Action result:`, execResult);
+
+				if (execResult.success === true) {
+					break; // success for this iteration
+				}
+
+				if (recoveryAttempt === MAX_RECOVERY_ATTEMPTS) {
+					// Out of retries
+					break;
+				}
+
+				// Re-analyze the page and re-plan
+				setMessages((prev) => [...prev, { type: "agent", text: `🔁 Action failed: ${execResult.message || "unknown"}. Re-analyzing page (attempt ${recoveryAttempt + 1}/${MAX_RECOVERY_ATTEMPTS})...` }]);
+
+				try {
+					await waitForPageStabilization(800);
+					await ensurePageIsReady(setMessages);
+
+					// Refresh tab state
+					currentTabState = await getCurrentTabsInfo();
+					if (!currentTabState.activeTab?.id) {
+						setMessages((prev) => [...prev, { type: "agent", text: "❌ No active tab found after failure. Stopping." }]);
+						break;
+					}
+
+					// Collect fresh DOM and get a new plan
+					currentDom = await collectDOMDataWithRetry();
+					const newTurn: PlannedActionResponse = await updateTaskAndGetPlan(serverUrl, {
+						task_id,
+						dom_data: currentDom,
+						iterationNumber: iteration,
+						openTabsWithIds: currentTabState.openTabsWithIds,
+						currentTab: { id: currentTabState.activeTab.id, url: currentTabState.activeTab.url },
+					});
+
+					const newPlanned = newTurn?.execution_result?.data?.browser_command || newTurn?.planned_action;
+					if (!newPlanned) {
+						setMessages((prev) => [...prev, { type: "agent", text: `⚠️ No new action suggested during recovery. Stopping.` }]);
+						break;
+					}
+
+					// Enrich with element data if present
+					const newElementData = newTurn.execution_result?.data?.element;
+					if (newElementData && newPlanned.parameters?.element_id === newElementData.element_id) {
+						console.log(`[AGENT-LOOP] Recovery enricher: updating action target`);
+						newPlanned.parameters.xpath = newElementData.xpath;
+						newPlanned.parameters.data_navigator_id = newElementData.attributes['data-navigator-id'];
+					}
+
+					nextAction = normalizeAction(newPlanned);
+					setMessages((prev) => [...prev, { type: "agent", text: `🧭 Recovery attempt ${recoveryAttempt + 1}: ${describeAction(nextAction)}` }]);
+
+				} catch (recoveryError: any) {
+					setMessages((prev) => [...prev, { type: "agent", text: `❌ Recovery failed: ${recoveryError.message}. Stopping.` }]);
+					break;
+				}
+
+				recoveryAttempt += 1;
+			}
 
 			if (execResult.success !== true) {
-				setMessages((prev) => [...prev, { type: "agent", text: `⚠️ Action failed: ${execResult.message || "unknown error"}` }]);
+				setMessages((prev) => [...prev, { type: "agent", text: `❌ Action failed after ${recoveryAttempt} recovery attempt(s): ${execResult.message || "unknown error"}` }]);
 				break;
 			}
 
