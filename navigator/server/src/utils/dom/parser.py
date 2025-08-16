@@ -1,4 +1,6 @@
+import json
 import logging
+import time
 from typing import Dict, List, Tuple, Any
 
 from bs4 import BeautifulSoup, NavigableString, Tag
@@ -167,7 +169,7 @@ def parse_full_dom(dom_data: FullDOMData) -> Tuple[Dict[int, Dict[int, DOMTagNod
 def parse_and_optimize_dom(
     dom_data: FullDOMData,
     detail_level: str = 'detailed'
-) -> Tuple[str, Dict[str, str], Dict[int, Dict[str, Any]]]:
+) -> Tuple[str, Dict[str, str], Dict[int, Dict[str, Any]], Dict[int, Dict[int, DOMTagNode]]]:
     """
     The single, definitive function to parse, enrich, and optimize the DOM for the LLM.
     """
@@ -192,7 +194,9 @@ def parse_and_optimize_dom(
             element_id = global_element_id_counter
             global_element_id_counter += 1
 
-            full_text = node.get_text(separator=' ', strip=True)
+            # Get only direct text content of this tag, not from child elements
+            direct_text_nodes = [text for text in node.strings if text.parent == node]
+            full_text = ' '.join(text.strip() for text in direct_text_nodes if text.strip())
 
             dom_node = DOMTagNode(
                 element_id=element_id,
@@ -242,6 +246,7 @@ def parse_and_optimize_dom(
     optimized_by_frame, element_data, url_map = advanced_dom_optimizer(
         parsed_frames, detail_level)
 
+
     optimized_sections: List[str] = []
     for frame_id, content in sorted(optimized_by_frame.items(), key=lambda x: x[0]):
         optimized_sections.append(f"--- Frame {frame_id} ---\n{content}")
@@ -249,6 +254,6 @@ def parse_and_optimize_dom(
 
     logger.info("DOM processing and optimization complete.")
 
-    return optimized_string, url_map, element_data
+    return optimized_string, url_map, element_data, parsed_frames
 
 

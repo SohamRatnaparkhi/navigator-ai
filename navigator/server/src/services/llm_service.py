@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from typing import List, Optional
 from src.api.schemas.tasks import ChainOfThought, CoTStep, PlannedAction, ScratchpadUpdate, TodoChanges, TodoAdd
 from src.config import LLM_PROVIDER, PLANNER_MODEL, COARSE_PLAN_MODEL
@@ -147,6 +148,10 @@ async def plan_next_action(prompt: str) -> PlannedAction:
     try:
         if provider == "gemini":
             client = get_gemini_client()
+
+            with open(f"prompt_{int(time.time())}.txt", "w") as f:
+                f.write(prompt)
+
             if client is None:
                 raise RuntimeError("Gemini client not configured")
             contents = [
@@ -225,7 +230,7 @@ async def plan_next_action(prompt: str) -> PlannedAction:
 async def update_scratchpad_via_llm(context: str, current_scratchpad: str) -> ScratchpadUpdate:
     """Ask a small LLM to update the scratchpad only, returning structured mode+text."""
     provider = (LLM_PROVIDER or "gemini").lower()
-    model_name = PLANNER_MODEL
+    model_name = COARSE_PLAN_MODEL
     prompt = get_scratchpad_update_prompt(context, current_scratchpad)
     try:
         if provider == "gemini":
@@ -285,7 +290,7 @@ async def update_scratchpad_via_llm(context: str, current_scratchpad: str) -> Sc
 async def update_todos_via_llm(context: str, current_todos: list[dict]) -> TodoChanges:
     """Ask a small LLM to update the todo list only (adds and marks-done)."""
     provider = (LLM_PROVIDER or "gemini").lower()
-    model_name = PLANNER_MODEL
+    model_name = COARSE_PLAN_MODEL
     prompt = get_todo_update_prompt(context, current_todos)
     try:
         if provider == "gemini":

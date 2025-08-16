@@ -85,7 +85,7 @@ async def ask_about_page(payload: Dict[str, Any] = Body(...)):
     dom_data = FullDOMData(**dom_raw)
 
     # Reuse our parsing pipeline to generate optimized DOM for QA context
-    optimized_dom_string, url_map, element_map = parse_and_optimize_dom(dom_data)
+    optimized_dom_string, url_map, element_map, parsed_frames = parse_and_optimize_dom(dom_data)
 
     # Build a QA prompt (answer-focused, concise, cite element ids where helpful)
     from src.services.tools.tools_registry import ToolsRegistry

@@ -1,31 +1,114 @@
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from src.services.llm_service import plan_next_action, update_scratchpad_via_llm, update_todos_via_llm
-from src.api.schemas.dom import FullDOMData, DOMTagNode
-from src.api.schemas.tasks import PlannedAction, ExecutionResult
+from src.api.schemas.dom import DOMTagNode, FullDOMData
+from src.api.schemas.tasks import ExecutionResult, PlannedAction
+
+from src.services import tools as _tools_autoreg  # noqa: F401
+from src.services.llm_service import (
+    plan_next_action,
+    update_scratchpad_via_llm,
+    update_todos_via_llm,
+)
 from src.services.redis_service import (
-    get_task_goal,
-    get_action_history,
+    add_todo,
     append_action_history,
     append_execution_log,
-    set_scratchpad,
-    get_scratchpad,
-    get_todo_list,
     append_scratchpad,
-    add_todo,
+    get_action_history,
+    get_scratchpad,
+    get_task_goal,
+    get_todo_list,
+    mark_todo_done,
+    set_scratchpad,
 )
 from src.services.tools.tools_registry import ToolsRegistry
-# Ensure tool modules are imported so the registry is populated
-from src.services import tools as _tools_autoreg  # noqa: F401
 from src.utils.dom.parser import parse_and_optimize_dom
 from src.utils.prompts.planner_prompt import get_planner_prompt
 
-
 logger = logging.getLogger(__name__)
+
+
+def create_word_batches(text: str, words_per_batch: int = 2000, padding_words: int = 250) -> List[str]:
+    """
+    Split text into word-based batches with padding for context.
+    
+    Args:
+        text: Input text to split
+        words_per_batch: Target words per batch
+        padding_words: Number of words to add as padding at start/end of each batch
+    
+    Returns:
+        List of batched text strings
+    """
+    words = text.split()
+    total_words = len(words)
+    
+    if total_words <= words_per_batch:
+        return [text]
+    
+    batches = []
+    start_idx = 0
+    
+    while start_idx < total_words:
+        core_end = min(start_idx + words_per_batch, total_words)
+        
+        actual_start = max(0, start_idx - padding_words)
+        
+        actual_end = min(total_words, core_end + padding_words)
+        
+        batch_words = words[actual_start:actual_end]
+        batch_text = " ".join(batch_words)
+        
+        batches.append(batch_text)
+        
+        start_idx = core_end
+    
+    return batches
+
+
+def replace_url_in_command(browser_command: Dict[str, Any], url_map: Dict[str, str]) -> Dict[str, Any]:
+    """
+    Replace URL mappings in browser commands for navigation actions.
+    
+    Args:
+        browser_command: The browser command dict
+        url_map: Mapping of url_id to actual URLs
+    
+    Returns:
+        Updated browser command with actual URLs
+    """
+    if not isinstance(browser_command, dict):
+        return browser_command
+    
+    tool = browser_command.get("tool", "").lower()
+    parameters = browser_command.get("parameters", {})
+    
+    if tool == "navigate_url":
+        url = parameters.get("url", "")
+        if isinstance(url, str):
+            # Check if this is a mapped URL (pattern: url_X)
+            url_pattern = re.search(r'url_(\d+)', url)
+            if url_pattern:
+                url_id = url_pattern.group(0)  # e.g., "url_1"
+                if url_id in url_map:
+                    # Replace with actual URL
+                    actual_url = url_map[url_id]
+                    parameters["url"] = url.replace(url_id, actual_url)
+                    
+                    return {
+                        **browser_command,
+                        "parameters": parameters
+                    }
+    
+    elif tool == "click":
+        pass
+    
+    return browser_command
 
 
 class Executor:
@@ -158,26 +241,94 @@ def _format_tools_for_prompt() -> str:
         lines.append("\n".join(block_lines))
     return "\n\n".join(lines)
 
+async def _plan_next_action_for_batch(
+    batch_text: str,
+    tools_text: str,
+    user_goal: str,
+    action_history: List[Dict[str, Any]],
+    scratchpad: str,
+    todo_list: List[Dict[str, Any]],
+    batch_index: int
+) -> PlannedAction:
+    """Plan action for a single batch of DOM content."""
+    prompt = get_planner_prompt(
+        tools_schema=tools_text,
+        optimized_dom=batch_text,
+        user_query=user_goal or "",
+        action_history=action_history[-15:],
+    ) + f"\n\nScratchpad:\n{scratchpad or ''}\n\nTodo List:\n{json.dumps(todo_list, ensure_ascii=False)}\n\nBatch {batch_index + 1}: Return ONLY JSON."
+
+    return await plan_next_action(prompt)
+
 
 async def _plan_next_action(
     task_id: str,
     optimized_dom_string: str,
     user_goal: str,
     action_history: List[Dict[str, Any]],
-) -> PlannedAction:
+) -> Tuple[PlannedAction, int]:
 
     scratchpad = await get_scratchpad(task_id)
     todo_list = await get_todo_list(task_id)
-
     tools_text = _format_tools_for_prompt()
-    prompt = get_planner_prompt(
-        tools_schema=tools_text,
-        optimized_dom=optimized_dom_string[:25000],
-        user_query=user_goal or "",
-        action_history=action_history[-15:],
-    ) + f"\n\nScratchpad:\n{scratchpad or ''}\n\nTodo List:\n{json.dumps(todo_list, ensure_ascii=False)}\n\nReturn ONLY JSON."
 
-    return await plan_next_action(prompt)
+    batches = create_word_batches(optimized_dom_string, words_per_batch=2000, padding_words=250)
+    
+    logger.info(f"Created {len(batches)} batches for planning. Total DOM words: {len(optimized_dom_string.split())}")
+    
+    if len(batches) == 1:
+        prompt = get_planner_prompt(
+            tools_schema=tools_text,
+            optimized_dom=batches[0],
+            user_query=user_goal or "",
+            action_history=action_history[-15:],
+        ) + f"\n\nScratchpad:\n{scratchpad or ''}\n\nTodo List:\n{json.dumps(todo_list, ensure_ascii=False)}\n\nReturn ONLY JSON."
+        
+        return await plan_next_action(prompt), 0
+    
+    tasks = [
+        _plan_next_action_for_batch(
+            batch_text=batch,
+            tools_text=tools_text,
+            user_goal=user_goal,
+            action_history=action_history,
+            scratchpad=scratchpad or "",
+            todo_list=todo_list or [],
+            batch_index=i
+        )
+        for i, batch in enumerate(batches)
+    ]
+    
+    try:
+        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        for i, result in enumerate(batch_results):
+            if isinstance(result, PlannedAction):
+                logger.info(f"Using planned action from batch {i + 1}")
+                return result, i
+            elif isinstance(result, Exception):
+                logger.warning(f"Batch {i + 1} failed: {result}")
+        
+        logger.warning("All batches failed, falling back to single batch approach")
+        prompt = get_planner_prompt(
+            tools_schema=tools_text,
+            optimized_dom=batches[0],
+            user_query=user_goal or "",
+            action_history=action_history[-15:],
+        ) + f"\n\nScratchpad:\n{scratchpad or ''}\n\nTodo List:\n{json.dumps(todo_list, ensure_ascii=False)}\n\nReturn ONLY JSON."
+        
+        return await plan_next_action(prompt), 0
+        
+    except Exception:
+        logger.exception("Error in parallel batch planning")
+        prompt = get_planner_prompt(
+            tools_schema=tools_text,
+            optimized_dom="\n".join(batches),
+            user_query=user_goal or "",
+            action_history=action_history[-15:],
+        ) + f"\n\nScratchpad:\n{scratchpad or ''}\n\nTodo List:\n{json.dumps(todo_list, ensure_ascii=False)}\n\nReturn ONLY JSON."
+        
+        return await plan_next_action(prompt), 0
 
 
 async def run_agent_loop(task_id: str, dom_data: FullDOMData, max_steps: int = 25) -> Dict[str, Any]:
@@ -185,13 +336,13 @@ async def run_agent_loop(task_id: str, dom_data: FullDOMData, max_steps: int = 2
     Runs the Perceive-Plan-Execute-Memorize loop. Returns the last execution result and any browser command to dispatch.
     """
     # Perceive
-    optimized_dom_string, url_map, element_map = parse_and_optimize_dom(dom_data)
+    optimized_dom_string, url_map, element_map, parsed_frames = parse_and_optimize_dom(dom_data)
 
     # Plan
     user_goal = await get_task_goal(task_id)
     action_history = await get_action_history(task_id)
     try:
-        planned_action = await _plan_next_action(
+        planned_action, selected_batch_index = await _plan_next_action(
             task_id=task_id,
             optimized_dom_string=optimized_dom_string,
             user_goal=user_goal or "",
@@ -202,7 +353,7 @@ async def run_agent_loop(task_id: str, dom_data: FullDOMData, max_steps: int = 2
         return ExecutionResult(status="error", message=f"Planner error: {e}").model_dump()
 
     # Execute
-    executor = Executor(parsed_dom_frames={})
+    executor = Executor(parsed_dom_frames=parsed_frames)
     try:
         exec_result = executor.execute(planned_action)
     except Exception as e:
@@ -210,11 +361,12 @@ async def run_agent_loop(task_id: str, dom_data: FullDOMData, max_steps: int = 2
         exec_result = ExecutionResult(status="error", message=f"Execution error: {e}")
 
     try:
+        dom_batches = create_word_batches(optimized_dom_string, words_per_batch=2000, padding_words=250)
         context_str = (
             f"Goal: {user_goal}\n"
             f"Recent actions: {json.dumps(action_history[-10:], ensure_ascii=False)}\n"
             f"Last result: {json.dumps(exec_result.model_dump(), ensure_ascii=False)}\n"
-            f"Page: {optimized_dom_string[:3000]}"
+            f"Page: {dom_batches[selected_batch_index] if dom_batches else ''}"
         )
         current_sp = await get_scratchpad(task_id)
         current_todos = await get_todo_list(task_id)
@@ -233,7 +385,6 @@ async def run_agent_loop(task_id: str, dom_data: FullDOMData, max_steps: int = 2
                 await add_todo(task_id, item.text, item.priority)
             for idx in (td_update.mark_done_indices or []):
                 try:
-                    from src.services.redis_service import mark_todo_done
                     await mark_todo_done(task_id, int(idx))
                 except Exception:
                     pass
@@ -246,7 +397,6 @@ async def run_agent_loop(task_id: str, dom_data: FullDOMData, max_steps: int = 2
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "action": planned_action.model_dump(),
         "result": exec_result.model_dump(),
-        "url_map": url_map,
     }
     await append_execution_log(task_id, log_entry)
 
@@ -262,6 +412,9 @@ async def run_agent_loop(task_id: str, dom_data: FullDOMData, max_steps: int = 2
     }
     cmd = (exec_result.data or {}).get("browser_command") if exec_result.data else None
     if isinstance(cmd, dict):
+        cmd = replace_url_in_command(cmd, url_map)
+        out["execution_result"]["data"]["browser_command"] = cmd
+        
         params = cmd.get("parameters", {})
         element_id = params.get("element_id")
         if isinstance(element_id, int) and element_id in element_map:

@@ -273,6 +273,8 @@ def advanced_dom_optimizer(
                     output_lines.append(
                         f"[Image element_id={node.element_id} {navigator_str}alt='{alt_text}']")
                     full_text = None
+                else:
+                    full_text = None
                 rendered_node_ids.add(node.element_id)
 
                 full_attrs = {k: v for k, v in node.attributes.items() if k not in excluded_attrs}
