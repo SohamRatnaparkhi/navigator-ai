@@ -9,6 +9,8 @@ interface SettingsProps {
   updateServerUrl: (url: string) => void;
   theme: string;
   llms: { id: number; name: string; unavailable: boolean }[];
+  debugMode: boolean;
+  setDebugMode: (debugMode: boolean) => void;
 }
 
 export default function Settings({
@@ -18,6 +20,8 @@ export default function Settings({
   updateServerUrl,
   theme,
   llms,
+  debugMode,
+  setDebugMode,
 }: SettingsProps) {
   return (
     <div className="flex-1 p-6 space-y-8">
@@ -124,6 +128,41 @@ export default function Settings({
               <p className={`mt-2 text-xs ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
                 The backend server URL for AI model communication
               </p>
+            </div>
+            <div>
+              <label
+                className={`block text-sm font-medium mb-2 ${theme === "dark" ? "text-gray-300" : "text-gray-700"}`}
+              >
+                Debug Mode
+              </label>
+              <div className="flex items-center justify-between">
+                <div className="flex-1">
+                  <p className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+                    Show visual overlays and element IDs on web pages
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newDebugMode = !debugMode;
+                    setDebugMode(newDebugMode);
+                    chrome.storage.local.set({ debugMode: newDebugMode });
+                  }}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                    debugMode 
+                      ? "bg-blue-600" 
+                      : theme === "dark" 
+                        ? "bg-gray-700" 
+                        : "bg-gray-200"
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ease-in-out ${
+                      debugMode ? "translate-x-6" : "translate-x-1"
+                    }`}
+                  />
+                </button>
+              </div>
             </div>
           </div>
         </div>

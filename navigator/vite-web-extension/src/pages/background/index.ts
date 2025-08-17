@@ -210,7 +210,7 @@ async function handleUpdateTask(message: UpdateTaskMessage): Promise<ContentMess
 }
 
 async function handleUpdateTaskAndGetPlan(message: any): Promise<ContentMessage> {
-  const { serverUrl, task_id, dom_data, iterationNumber, openTabsWithIds, currentTab, scratchpad, add_todo, mark_todo_done_index } = message.payload;
+  const { serverUrl, task_id, dom_data, iterationNumber, openTabsWithIds, currentTab, scratchpad, add_todo, mark_todo_done_index, iteration_result } = message.payload;
 
   try {
     const response = await fetch(`${serverUrl.replace(/\/$/, '')}/tasks/update`, {
@@ -226,7 +226,8 @@ async function handleUpdateTaskAndGetPlan(message: any): Promise<ContentMessage>
         currentTab: currentTab ?? null,
         scratchpad,
         add_todo,
-        mark_todo_done_index
+        mark_todo_done_index,
+        iteration_result
       }),
     });
 
@@ -277,12 +278,12 @@ async function handleCollectDomData(): Promise<any> {
         throw new Error('Could not get frame information for the tab.');
     }
 
+    const isDebugMode = (await chrome.storage.local.get('debugMode')).debugMode == 'true';
     const executionResults = await Promise.all(
         allFrames.map(frame => {
             return chrome.scripting.executeScript({
                 target: { tabId, frameIds: [frame.frameId] },
                 func: () => {
-                    const isDebugMode = true; 
                     const viewportExpansion = 100;
 
                     const getRandomColor = (): string => {
@@ -315,7 +316,7 @@ async function handleCollectDomData(): Promise<any> {
                                 rect.bottom > (0 - viewportExpansion) &&
                                 rect.left < (window.innerWidth + viewportExpansion) &&
                                 rect.right > (0 - viewportExpansion)
-                            );
+                            ) ;
 
                             if (!isInExpandedViewport) return;
 
@@ -374,13 +375,6 @@ async function handleCollectDomData(): Promise<any> {
 
                     const html = document.documentElement.outerHTML;
                     
-
-                    if (!isDebugMode) {
-                      document.querySelectorAll('[data-navigator-id]').forEach(el => {
-                          el.removeAttribute('data-navigator-id');
-                          (el as HTMLElement).style.border = '';
-                      });
-                    }
                     return { html, metadata: interactiveMetadata };
                 }
             }).then(result => ({

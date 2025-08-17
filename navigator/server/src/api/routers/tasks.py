@@ -21,7 +21,6 @@ async def create_task(request: CreateTaskRequest = Body(...)) -> CreateTaskRespo
     logger.info(f"Task {task_id} created and stored in Redis")
     cot, meta = generate_chain_of_thought(request.task, request.url, request.openTabsWithIds, request.currentTab)
     key = f"task:{task_id}"
-    # Store a richer state so planner can read the goal later
     value = {
         "task": request.task,
         "url": request.url,
@@ -54,7 +53,6 @@ async def update_task(update_data: Dict[str, Any] = Body(...)):
         logger.warning(f"Task {task_id} not found")
         return {"status": "not found", "task_id": task_id}
 
-    # Optional context management operations from the extension
     if (sp := update_data.get("scratchpad")) is not None:
         await set_scratchpad(task_id, sp)
     if (new_todo := update_data.get("add_todo")):
@@ -65,8 +63,8 @@ async def update_task(update_data: Dict[str, Any] = Body(...)):
         except Exception:
             pass
 
-    # Run a single loop turn
-    loop_result = await run_agent_loop(task_id=task_id, dom_data=dom_data)
+    iteration_result = update_data.get("iteration_result")
+    loop_result = await run_agent_loop(task_id=task_id, dom_data=dom_data, iteration_result=iteration_result)
 
     logger.info(f"Task {task_id} loop turn completed")
     todos = await get_todo_list(task_id)

@@ -8,11 +8,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.api.schemas.dom import DOMTagNode, FullDOMData
-from src.api.schemas.tasks import ExecutionResult, PlannedAction
+from src.api.schemas.tasks import ExecutionResult, PlannedAction, PlannedActionSequence
 
 from src.services import tools as _tools_autoreg  # noqa: F401
 from src.services.llm_service import (
-    plan_next_action,
+    plan_next_actions,
     update_scratchpad_via_llm,
     update_todos_via_llm,
 )
@@ -283,7 +283,7 @@ async def _plan_next_action_for_batch(
     scratchpad: str,
     todo_list: List[Dict[str, Any]],
     batch_index: int
-) -> PlannedAction:
+) -> PlannedActionSequence:
     """Plan action for a single batch of DOM content."""
     prompt = get_planner_prompt(
         tools_schema=tools_text,
@@ -292,7 +292,26 @@ async def _plan_next_action_for_batch(
         action_history=action_history[-15:],
     ) + f"\n\nScratchpad:\n{scratchpad or ''}\n\nTodo List:\n{json.dumps(todo_list, ensure_ascii=False)}\n\nBatch {batch_index + 1}: Return ONLY JSON."
 
-    return await plan_next_action(prompt)
+    return await plan_next_actions(prompt)
+
+def format_iteration_results(prev_iteration_result: Optional[Dict[str, Any]]) -> str:
+    try:
+        if prev_iteration_result is None:
+            return ""
+        statements = []
+        for result in prev_iteration_result.get("results"):
+            action = result.get("action")
+            message = result.get("message")
+            if action:
+                statements.append(f"The previous iteration was successful. The user's goal was achieved. The action was: {action} and the result was - {message}.")
+            else:
+                statements.append(f"The previous iteration was unsuccessful. The user's goal was not achieved. The error message was: {message}.")
+            if statements:
+                return f"Here are the results of the previous iteration:\n{'\n'.join(statements)}"
+            return ""
+    except Exception:
+        logger.exception("Failed to format iteration results")
+        return ""
 
 
 async def _plan_next_action(
@@ -300,11 +319,14 @@ async def _plan_next_action(
     optimized_dom_string: str,
     user_goal: str,
     action_history: List[Dict[str, Any]],
-) -> Tuple[PlannedAction, int]:
+    prev_iteration_result: Optional[Dict[str, Any]] = None,
+) -> Tuple[PlannedActionSequence, int]:
 
     scratchpad = await get_scratchpad(task_id)
     todo_list = await get_todo_list(task_id)
     tools_text = _format_tools_for_prompt()
+
+    formatted_iteration_results = format_iteration_results(prev_iteration_result)
 
     batches = create_word_batches(optimized_dom_string, words_per_batch=2000, padding_words=250)
     
@@ -316,9 +338,9 @@ async def _plan_next_action(
             optimized_dom=batches[0],
             user_query=user_goal or "",
             action_history=action_history[-15:],
-        ) + f"\n\nScratchpad:\n{scratchpad or ''}\n\nTodo List:\n{json.dumps(todo_list, ensure_ascii=False)}\n\nReturn ONLY JSON."
+        ) + f"\n\n{formatted_iteration_results} \n\nScratchpad:\n{scratchpad or ''}\n\nTodo List:\n{json.dumps(todo_list, ensure_ascii=False)}\n\nReturn ONLY JSON."
         
-        return await plan_next_action(prompt), 0
+        return await plan_next_actions(prompt), 0
     
     tasks = [
         _plan_next_action_for_batch(
@@ -337,7 +359,7 @@ async def _plan_next_action(
         batch_results = await asyncio.gather(*tasks, return_exceptions=True)
         
         for i, result in enumerate(batch_results):
-            if isinstance(result, PlannedAction):
+            if isinstance(result, PlannedActionSequence):
                 logger.info(f"Using planned action from batch {i + 1}")
                 return result, i
             elif isinstance(result, Exception):
@@ -349,9 +371,9 @@ async def _plan_next_action(
             optimized_dom=batches[0],
             user_query=user_goal or "",
             action_history=action_history[-15:],
-        ) + f"\n\nScratchpad:\n{scratchpad or ''}\n\nTodo List:\n{json.dumps(todo_list, ensure_ascii=False)}\n\nReturn ONLY JSON."
+        ) + f"\n\n{formatted_iteration_results} \n\n Scratchpad:\n{scratchpad or ''}\n\nTodo List:\n{json.dumps(todo_list, ensure_ascii=False)}\n\nReturn ONLY JSON."
         
-        return await plan_next_action(prompt), 0
+        return await plan_next_actions(prompt), 0
         
     except Exception:
         logger.exception("Error in parallel batch planning")
@@ -362,10 +384,10 @@ async def _plan_next_action(
             action_history=action_history[-15:],
         ) + f"\n\nScratchpad:\n{scratchpad or ''}\n\nTodo List:\n{json.dumps(todo_list, ensure_ascii=False)}\n\nReturn ONLY JSON."
         
-        return await plan_next_action(prompt), 0
+        return await plan_next_actions(prompt), 0
 
 
-async def run_agent_loop(task_id: str, dom_data: FullDOMData, max_steps: int = 25) -> Dict[str, Any]:
+async def run_agent_loop(task_id: str, dom_data: FullDOMData, iteration_result: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Runs the Perceive-Plan-Execute-Memorize loop. Returns the last execution result and any browser command to dispatch.
     """
@@ -397,11 +419,12 @@ async def run_agent_loop(task_id: str, dom_data: FullDOMData, max_steps: int = 2
             logger.exception("Failed writing perception logs")
 
     try:
-        planned_action, selected_batch_index = await _plan_next_action(
+        planned_seq, selected_batch_index = await _plan_next_action(
             task_id=task_id,
             optimized_dom_string=optimized_dom_string,
             user_goal=user_goal or "",
             action_history=action_history or [],
+            prev_iteration_result=iteration_result,
         )
     except Exception as e:
         logger.exception("Planner failed")
@@ -409,14 +432,20 @@ async def run_agent_loop(task_id: str, dom_data: FullDOMData, max_steps: int = 2
     else:
         if logs_run_dir is not None:
             try:
-                _safe_write_json(logs_run_dir / "planned_action.json", planned_action.model_dump())
+                # Write both the full sequence and the first action for debugging
+                _safe_write_json(logs_run_dir / "planned_actions.json", planned_seq.model_dump())
+                if (planned_seq.actions or []):
+                    _safe_write_json(logs_run_dir / "planned_action.json", planned_seq.actions[0].model_dump())
             except Exception:
                 logger.exception("Failed writing planned action log")
 
     # Execute
     executor = Executor(parsed_dom_frames=parsed_frames)
+    primary_action: Optional[PlannedAction] = (planned_seq.actions or [None])[0] if planned_seq else None
     try:
-        exec_result = executor.execute(planned_action)
+        if not isinstance(primary_action, PlannedAction):
+            raise RuntimeError("Planner produced no actionable items")
+        exec_result = executor.execute(primary_action)
     except Exception as e:
         logger.exception("Executor failed")
         exec_result = ExecutionResult(status="error", message=f"Execution error: {e}")
@@ -429,10 +458,12 @@ async def run_agent_loop(task_id: str, dom_data: FullDOMData, max_steps: int = 2
 
     # Persist planner reasoning to scratchpad (concise)
     try:
-        if getattr(planned_action, "reasoning", None):
-            concise_reason = str(planned_action.reasoning).strip()
-            if concise_reason:
-                await append_scratchpad(task_id, f"Planner reasoning: {concise_reason}")
+        # Prefer sequence-level reasoning, fallback to first action reasoning
+        seq_reasoning = getattr(planned_seq, "reasoning", None)
+        act_reasoning = getattr((planned_seq.actions or [None])[0], "reasoning", None)
+        concise_reason = str(seq_reasoning or act_reasoning or "").strip()
+        if concise_reason:
+            await append_scratchpad(task_id, f"Planner reasoning: {concise_reason}")
     except Exception:
         logger.exception("Failed appending planner reasoning to scratchpad")
 
@@ -468,22 +499,34 @@ async def run_agent_loop(task_id: str, dom_data: FullDOMData, max_steps: int = 2
         logger.exception("Memory LLM updates failed")
 
     # Memorize
-    await append_action_history(task_id, planned_action.model_dump())
+    # Record the whole planned sequence for traceability
+    try:
+        await append_action_history(task_id, planned_seq.model_dump())
+    except Exception:
+        # Fallback to logging first action only
+        try:
+            if planned_seq.actions:
+                await append_action_history(task_id, planned_seq.actions[0].model_dump())
+        except Exception:
+            pass
     log_entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "action": planned_action.model_dump(),
+        "action": (planned_seq.actions[0].model_dump() if planned_seq.actions else {}),
         "result": exec_result.model_dump(),
     }
     await append_execution_log(task_id, log_entry)
 
     # Special memory handling (keep for deterministic capture of extracted text)
-    if planned_action.action.lower() == "extract_text" and exec_result.status == "success":
+    if primary_action and primary_action.action.lower() == "extract_text" and exec_result.status == "success":
         text = (exec_result.data or {}).get("text", "")
         if text:
             await append_scratchpad(task_id, text)
 
     out = {
-        "planned_action": planned_action.model_dump(),
+        # Backward-compatible single action (first item)
+        "planned_action": (planned_seq.actions[0].model_dump() if planned_seq.actions else {}),
+        # New multi-action field
+        "planned_actions": [a.model_dump() for a in (planned_seq.actions or [])],
         "execution_result": exec_result.model_dump(),
     }
     # Include token usage and provider/model info for memory updates

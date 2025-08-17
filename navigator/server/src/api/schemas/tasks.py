@@ -49,6 +49,14 @@ class PlannedAction(BaseModel):
     token_usage: Optional[Dict[str, Any]] = None
 
 
+class PlannedActionSequence(BaseModel):
+    actions: List[PlannedAction]
+    reasoning: Optional[str] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    token_usage: Optional[Dict[str, Any]] = None
+
+
 class ExecutionResult(BaseModel):
     status: str  # "success" | "error"
     message: str

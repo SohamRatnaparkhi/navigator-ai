@@ -1,4 +1,4 @@
-type ExecutionResult = { success: boolean; message?: string };
+type ExecutionResult = { success: boolean; message?: string; attempts?: number };
 
 type ActionInput = {
 	type: "CLICK" | "TYPE" | "SCROLL" | "NAVIGATE" | "TASK_COMPLETE" | "TASK_FAILED" | string;
@@ -102,40 +102,40 @@ export async function executeAction(
 
 	// --- Handle non-page actions first ---
 	if (action.type === "TASK_COMPLETE" || action.type === "TASK_FAILED") {
-		return { success: true };
+		return { success: true, attempts: 1 };
 	}
 	if (action.type === "NAVIGATE") {
 		if (!action.url) return { success: false, message: "NAVIGATE action requires a url parameter." };
 		await chrome.tabs.update(tabId, { url: action.url });
-		return { success: true };
+		return { success: true, attempts: 1 };
 	}
 	if (action.type === "go_back") {
 		await chrome.tabs.goBack(tabId);
-		return { success: true };
+		return { success: true, attempts: 1 };
 	}
 	if (action.type === "go_forward") {
 		await chrome.tabs.goForward(tabId);
-		return { success: true };
+		return { success: true, attempts: 1 };
 	}
 	if (action.type === "refresh_page") {
 		await chrome.tabs.reload(tabId);
-		return { success: true };
+		return { success: true, attempts: 1 };
 	}
     if (action.type === "open_new_tab") {
         await chrome.tabs.create({ url: action.url || undefined });
-        return { success: true };
+        return { success: true, attempts: 1 };
     }
     if (action.type === "switch_to_tab") {
         if (typeof action.tab_id !== "number") {
             return { success: false, message: "switch_to_tab requires tab_id" };
         }
         await chrome.tabs.update(action.tab_id, { active: true });
-        return { success: true };
+        return { success: true, attempts: 1 };
     }
     if (action.type === "close_current_tab") {
         const targetTabId = typeof action.tab_id === "number" ? action.tab_id : tabId;
         await chrome.tabs.remove(targetTabId);
-        return { success: true };
+        return { success: true, attempts: 1 };
     }
 
 	// --- Handle actions that interact with the page content ---
@@ -212,7 +212,7 @@ async function executePageAction(
 
 			if (raceResult.kind === 'nav' || raceResult.kind === 'timeout') {
 				console.log(`[ORCHESTRATOR] ${raceResult.kind === 'nav' ? 'Navigation detected' : 'Action timeout'} during execution. Treating as success.`);
-				return { success: true, message: "Navigation detected during action" };
+				return { success: true, message: "Navigation detected during action", attempts: attempt };
 			}
 
 			if (raceResult.kind !== 'result') {
@@ -235,11 +235,11 @@ async function executePageAction(
 				const afterUrl = afterTab.url || "";
 				if (result.success === false && afterUrl && afterUrl !== initialUrl) {
 					console.log(`[ORCHESTRATOR] URL changed from '${initialUrl}' to '${afterUrl}' while action reported failure. Treating as navigation success.`);
-					return { success: true, message: "Navigation detected during action" };
+					return { success: true, message: "Navigation detected during action", attempts: attempt };
 				}
 			} catch {}
 
-			return result;
+			return { ...result, attempts: attempt };
 
 		} catch (error: any) {
 			lastError = error;
@@ -248,7 +248,7 @@ async function executePageAction(
 
 			if (isNavigationRelatedError(errorMessage)) {
 				console.log("[ORCHESTRATOR] Navigation detected during action. Treating as success.");
-				return { success: true, message: "Navigation detected during action" };
+				return { success: true, message: "Navigation detected during action", attempts: attempt };
 			}
 
 			// Check for recoverable errors
@@ -266,7 +266,7 @@ async function executePageAction(
 	// All attempts failed
 	const errorMessage = lastError?.message || String(lastError);
 	console.error("[ORCHESTRATOR] All attempts failed. Final error:", lastError);
-	return { success: false, message: `Action failed after ${maxRetries} attempts: ${errorMessage}` };
+	return { success: false, message: `Action failed after ${maxRetries} attempts: ${errorMessage}`, attempts: maxRetries };
 }
 
 async function waitForTabReady(tabId: number, attempt: number): Promise<void> {

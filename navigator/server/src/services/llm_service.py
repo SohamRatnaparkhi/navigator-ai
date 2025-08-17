@@ -1,7 +1,7 @@
 import json
 import logging
 from typing import List, Optional, Tuple, Dict, Any
-from src.api.schemas.tasks import ChainOfThought, CoTStep, PlannedAction, ScratchpadUpdate, TodoChanges, TodoAdd
+from src.api.schemas.tasks import ChainOfThought, CoTStep, PlannedAction, PlannedActionSequence, ScratchpadUpdate, TodoChanges, TodoAdd
 from src.config import LLM_PROVIDER, PLANNER_MODEL, COARSE_PLAN_MODEL
 from src.utils.llm_clients import get_gemini_client, get_openai_client, get_groq_client
 from src.utils.prompts.coarse_plan_prompt import get_coarse_plan_prompt
@@ -299,6 +299,185 @@ async def plan_next_action(prompt: str) -> PlannedAction:
         token_usage=locals().get("token_usage"),
     )
     return planned
+
+
+async def plan_next_actions(prompt: str) -> PlannedActionSequence:
+    """Calls the Planner LLM and returns a sequence of actions.
+
+    The LLM should return JSON with shape:
+    { actions: [{ action: string, parameters: object }...], reasoning?: string }
+    Falls back to single action object by wrapping into actions array.
+    """
+    provider = (LLM_PROVIDER or "gemini").lower()
+    model_name = PLANNER_MODEL
+
+    actions_schema = {
+        "name": "planned_action_sequence",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "actions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "action": {"type": "string"},
+                            "parameters": {"type": "object"},
+                            "reasoning": {"type": "string"},
+                        },
+                        "required": ["action"],
+                        "additionalProperties": True,
+                    },
+                    "minItems": 1,
+                },
+                "reasoning": {"type": "string"},
+            },
+            "required": ["actions"],
+            "additionalProperties": True,
+        },
+        "strict": False,
+    }
+
+    try:
+        if provider == "gemini":
+            client = get_gemini_client()
+            if client is None:
+                raise RuntimeError("Gemini client not configured")
+            contents = [
+                genai_types.Content(
+                    role="user",
+                    parts=[genai_types.Part.from_text(text=prompt)],
+                )
+            ]
+            cfg = build_gemini_generate_config(json_mime=True)
+            response = client.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=cfg,
+            )
+            text = getattr(response, "text", None) or str(response)
+            usage_meta = getattr(response, "usage_metadata", None)
+            token_usage = None
+            if usage_meta:
+                token_usage = {
+                    "input_tokens": getattr(usage_meta, "prompt_token_count", None),
+                    "output_tokens": getattr(usage_meta, "candidates_token_count", None),
+                    "total_tokens": getattr(usage_meta, "total_token_count", None),
+                }
+        elif provider == "openai":
+            client = get_openai_client()
+            if client is None:
+                raise RuntimeError("OpenAI client not configured")
+            messages = [
+                {"role": "system", "content": "You must respond with ONLY valid JSON."},
+                {"role": "user", "content": prompt},
+            ]
+            args = build_openai_chat_args(
+                model=model_name,
+                reasoning_effort="medium" if model_name.startswith("gpt-5") else None,
+                verbosity="low" if model_name.startswith("gpt-5") else None,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": actions_schema,
+                },
+                messages=messages,
+            )
+            resp = client.chat.completions.create(**args)
+            text = resp.choices[0].message.content or "{}"
+            token_usage = None
+            if getattr(resp, "usage", None) is not None:
+                u = resp.usage
+                token_usage = {
+                    "prompt_tokens": getattr(u, "prompt_tokens", None),
+                    "completion_tokens": getattr(u, "completion_tokens", None),
+                    "total_tokens": getattr(u, "total_tokens", None),
+                }
+        elif provider == "groq":
+            client = get_groq_client()
+            if client is None:
+                raise RuntimeError("Groq client not configured")
+            messages = [
+                {"role": "system", "content": "You must respond with ONLY valid JSON."},
+                {"role": "user", "content": prompt},
+            ]
+            args = build_groq_chat_args(
+                model=model_name,
+                temperature=0.2,
+                response_format={"type": "json_object"},
+                messages=messages,
+            )
+            resp = client.chat.completions.create(**args)
+            text = resp.choices[0].message.content or "{}"
+            token_usage = None
+            if getattr(resp, "usage", None) is not None:
+                u = resp.usage
+                token_usage = {
+                    "prompt_tokens": getattr(u, "prompt_tokens", None),
+                    "completion_tokens": getattr(u, "completion_tokens", None),
+                    "total_tokens": getattr(u, "total_tokens", None),
+                }
+            else:
+                raw = getattr(resp, "with_raw_response", None)
+                headers = getattr(raw, "headers", {}) if raw else {}
+                usage_hdr = headers.get("X-Usage-Info") if isinstance(headers, dict) else None
+                if usage_hdr:
+                    try:
+                        token_usage = json.loads(usage_hdr)
+                    except Exception:
+                        token_usage = {"raw": usage_hdr}
+        else:
+            raise RuntimeError(f"Unsupported LLM provider: {provider}")
+    except Exception as e:
+        logger.exception("Planner provider call failed for plan_next_actions")
+        raise RuntimeError(f"Planner LLM call failed: {e}")
+
+    try:
+        obj_start = text.find("{")
+        obj_end = text.rfind("}")
+        json_str = text[obj_start: obj_end + 1] if obj_start != -1 and obj_end != -1 else text
+        data = json.loads(json_str)
+        actions_data = None
+        reasoning = None
+        # Accept both array and single-object formats
+        if isinstance(data, dict):
+            if "actions" in data and isinstance(data["actions"], list):
+                actions_data = data["actions"]
+                reasoning = data.get("reasoning")
+            elif "action" in data:
+                actions_data = [data]
+                reasoning = data.get("reasoning")
+        elif isinstance(data, list):
+            actions_data = data
+        if not actions_data or not isinstance(actions_data, list):
+            raise ValueError("Planner did not return an actions array")
+    except Exception as e:
+        logger.error(f"Failed to parse planner output as JSON: {text}")
+        raise RuntimeError(f"Invalid planner output: {e}")
+
+    actions: list[PlannedAction] = []
+    for item in actions_data:
+        if not isinstance(item, dict):
+            continue
+        actions.append(
+            PlannedAction(
+                action=str(item.get("action", "")).strip(),
+                parameters=item.get("parameters") or {},
+                reasoning=str(item.get("reasoning", "")).strip() or None,
+                provider=provider,
+                model=model_name,
+                token_usage=locals().get("token_usage"),
+            )
+        )
+    if not actions:
+        raise RuntimeError("Planner returned no valid actions")
+
+    return PlannedActionSequence(
+        actions=actions,
+        reasoning=str(reasoning or "").strip() or None,
+        provider=provider,
+        model=model_name,
+        token_usage=locals().get("token_usage"),
+    )
 
 
 async def update_scratchpad_via_llm(context: str, current_scratchpad: str) -> ScratchpadUpdate:

@@ -13,6 +13,10 @@ interface PlannedActionResponse {
 		action: string;
 		parameters?: any;
 	};
+	planned_actions?: Array<{
+		action: string;
+		parameters?: any;
+	}>;
 	execution_result?: {
 		status: "success" | "error";
 		message?: string;
@@ -54,7 +58,7 @@ export async function runAgentLoop(
 
 		// Initial setup with better error handling
 		console.log("[AGENT-LOOP] Starting agent loop with query:", query);
-		
+
 		const { activeTab, openTabsWithIds } = await getCurrentTabsInfo();
 		if (!activeTab?.id) {
 			throw new Error("No active tab found to work with");
@@ -85,6 +89,7 @@ export async function runAgentLoop(
 		let iteration = 0;
 		const maxIterations = 25;
 		let done = false;
+		let lastIterationResult: any = null;
 
 		while (!done && iteration < maxIterations) {
 			if (shouldStop()) {
@@ -96,14 +101,14 @@ export async function runAgentLoop(
 
 			// STEP 1: Ensure page is ready and collect current state
 			setMessages((prev) => [...prev, { type: "agent", text: `🔍 Step ${iteration + 1}: Analyzing current page...` }]);
-			
+
 			let currentTabState;
 			let currentDom;
-			
+
 			try {
 				// Wait for page to be fully ready before doing anything
 				await ensurePageIsReady(setMessages);
-				
+
 				// Get current tab state
 				currentTabState = await getCurrentTabsInfo();
 				if (!currentTabState.activeTab?.id) {
@@ -116,7 +121,7 @@ export async function runAgentLoop(
 				// Collect fresh DOM from current page
 				currentDom = await collectDOMDataWithRetry();
 				console.log(`[AGENT-LOOP] DOM collected successfully for iteration ${iteration}`);
-				
+
 			} catch (error: any) {
 				setMessages((prev) => [...prev, { type: "agent", text: `❌ Failed to analyze page: ${error.message}. Stopping.` }]);
 				break;
@@ -124,7 +129,7 @@ export async function runAgentLoop(
 
 			// STEP 2: Send DOM to backend and get plan
 			setMessages((prev) => [...prev, { type: "agent", text: `🧠 Getting plan from AI...` }]);
-			
+
 			let turn: PlannedActionResponse;
 			try {
 				turn = await updateTaskAndGetPlan(serverUrl, {
@@ -133,6 +138,7 @@ export async function runAgentLoop(
 					iterationNumber: iteration,
 					openTabsWithIds: currentTabState.openTabsWithIds,
 					currentTab: { id: currentTabState.activeTab.id, url: currentTabState.activeTab.url },
+					iteration_result: lastIterationResult || undefined,
 				});
 
 				if (iteration === 0) {
@@ -148,120 +154,103 @@ export async function runAgentLoop(
 				break;
 			}
 
-			// STEP 3: Process the planned action
-			const planned = turn?.execution_result?.data?.browser_command || turn?.planned_action;
+			// STEP 3: Process planned actions (support multiple)
+			const rawPlannedList: any[] = Array.isArray(turn?.planned_actions)
+				? (turn!.planned_actions as any[])
+				: [turn?.execution_result?.data?.browser_command || turn?.planned_action].filter(Boolean) as any[];
 
-			if (!planned) {
-				setMessages((prev) => [...prev, { type: "agent", text: `⚠️ No action planned for this step. Stopping.` }]);
+			if (!rawPlannedList.length) {
+				setMessages((prev) => [...prev, { type: "agent", text: `⚠️ No actions planned for this step. Stopping.` }]);
 				break;
 			}
 
-			// Enrich action with element data if available
+			// Enrich first planned action with element data if available
 			const fullElementData = turn.execution_result?.data?.element;
-			if (fullElementData && planned.parameters?.element_id === fullElementData.element_id) {
-				console.log(`[AGENT-LOOP] Enriching action with element data for iteration ${iteration}`);
-				planned.parameters.xpath = fullElementData.xpath;
-				planned.parameters.data_navigator_id = fullElementData.attributes['data-navigator-id'];
+			if (fullElementData && rawPlannedList[0]?.parameters?.element_id === fullElementData.element_id) {
+				console.log(`[AGENT-LOOP] Enriching first action with element data for iteration ${iteration}`);
+				rawPlannedList[0].parameters.xpath = fullElementData.xpath;
+				rawPlannedList[0].parameters.data_navigator_id = fullElementData.attributes['data-navigator-id'];
 			}
 
-			const action = normalizeAction(planned);
+			const normalizedActions = rawPlannedList.map(pl => normalizeAction(pl));
 
-			// Check for completion
-			if (action.type === "TASK_COMPLETE" || action.type === "TASK_FAILED") {
+			// Check for immediate control actions
+			if (normalizedActions.length === 1 && (normalizedActions[0].type === "TASK_COMPLETE" || normalizedActions[0].type === "TASK_FAILED")) {
 				done = true;
-				setMessages((prev) => [...prev, { type: "agent", text: action.type === "TASK_COMPLETE" ? `🎉 Task completed successfully!` : `❌ Task failed: ${action.message || "unknown error"}` }]);
+				setMessages((prev) => [...prev, { type: "agent", text: normalizedActions[0].type === "TASK_COMPLETE" ? `🎉 Task completed successfully!` : `❌ Task failed: ${normalizedActions[0].message || "unknown error"}` }]);
 				break;
 			}
 
-			// STEP 4: Execute the action
-			setMessages((prev) => [...prev, { type: "agent", text: describeAction(action) }]);
+			// STEP 4: Execute the actions sequentially with per-action retries
+			setMessages((prev) => [...prev, { type: "agent", text: `🔧 Executing ${normalizedActions.length} action(s) for this step...` }]);
+			const batchResults: Array<{ index: number; action: any; success: boolean; message?: string; attempts: number; navigationDetected: boolean }> = [];
+			let anySuccess = false;
+			let navigationDetected = false;
 
-			// New: recovery loop that re-collects DOM and re-plans up to 4 times on failures
-			const MAX_RECOVERY_ATTEMPTS = 4;
-			let recoveryAttempt = 0;
-			let execResult: any = { success: false, message: "" };
-			let nextAction = action;
-
-			while (recoveryAttempt <= MAX_RECOVERY_ATTEMPTS) {
+			for (let i = 0; i < normalizedActions.length; i++) {
 				if (shouldStop()) {
 					setMessages((prev) => [...prev, { type: "agent", text: "⏹️ Stopped." }]);
 					break;
 				}
+				const nextAction = normalizedActions[i];
+				setMessages((prev) => [...prev, { type: "agent", text: describeAction(nextAction) }]);
+				const result = await executeActionSafely(currentTabState.activeTab.id, nextAction, iteration, setMessages);
+				console.log(`[AGENT-LOOP] Action ${i + 1}/${normalizedActions.length} result:`, result);
+				anySuccess = anySuccess || result.success === true;
+				navigationDetected = navigationDetected || (result.message?.includes("Navigation detected during action") ?? false);
+				batchResults.push({ index: i, action: nextAction, success: !!result.success, message: result.message, attempts: result.attempts ?? 1, navigationDetected });
 
-				// Execute current planned action
-				execResult = await executeActionSafely(currentTabState.activeTab.id, nextAction, iteration, setMessages);
-				console.log(`[AGENT-LOOP] Action result:`, execResult);
-
-				if (execResult.success === true) {
-					break; // success for this iteration
-				}
-
-				if (recoveryAttempt === MAX_RECOVERY_ATTEMPTS) {
-					// Out of retries
+				if (result.success !== true) {
+					// Action failed after retries; continue to next action in the batch
+					setMessages((prev) => [...prev, { type: "agent", text: `⚠️ Action ${i + 1} failed: ${result.message || "unknown"}` }]);
+				} else if (navigationDetected) {
+					// Stop executing further planned actions on navigation; we'll re-assess on next iteration
+					setMessages((prev) => [...prev, { type: "agent", text: `↪️ Navigation occurred. Stopping remaining actions in this batch.` }]);
 					break;
 				}
+			}
 
-				// Re-analyze the page and re-plan
-				setMessages((prev) => [...prev, { type: "agent", text: `🔁 Action failed: ${execResult.message || "unknown"}. Re-analyzing page (attempt ${recoveryAttempt + 1}/${MAX_RECOVERY_ATTEMPTS})...` }]);
-
+			// Fallback if none succeeded: try going back
+			let fallbackPerformed: string | null = null;
+			if (!anySuccess) {
+				setMessages((prev) => [...prev, { type: "agent", text: `🛑 All actions in this batch failed. Attempting fallback (go back)...` }]);
 				try {
-					await waitForPageStabilization(800);
-					await ensurePageIsReady(setMessages);
-
-					// Refresh tab state
-					currentTabState = await getCurrentTabsInfo();
-					if (!currentTabState.activeTab?.id) {
-						setMessages((prev) => [...prev, { type: "agent", text: "❌ No active tab found after failure. Stopping." }]);
-						break;
+					const fb = await executeActionSafely(currentTabState.activeTab.id, { type: "go_back" }, iteration, setMessages);
+					if (fb.success) {
+						fallbackPerformed = "go_back";
+						setMessages((prev) => [...prev, { type: "agent", text: `⬅️ Went back in history to recover.` }]);
+					} else {
+						setMessages((prev) => [...prev, { type: "agent", text: `⚠️ Fallback go back failed: ${fb.message || "unknown"}. Trying refresh...` }]);
+						const rf = await executeActionSafely(currentTabState.activeTab.id, { type: "refresh_page" }, iteration, setMessages);
+						if (rf.success) {
+							fallbackPerformed = "refresh_page";
+							setMessages((prev) => [...prev, { type: "agent", text: `🔄 Page refreshed.` }]);
+						}
 					}
-
-					// Collect fresh DOM and get a new plan
-					currentDom = await collectDOMDataWithRetry();
-					const newTurn: PlannedActionResponse = await updateTaskAndGetPlan(serverUrl, {
-						task_id,
-						dom_data: currentDom,
-						iterationNumber: iteration,
-						openTabsWithIds: currentTabState.openTabsWithIds,
-						currentTab: { id: currentTabState.activeTab.id, url: currentTabState.activeTab.url },
-					});
-
-					const newPlanned = newTurn?.execution_result?.data?.browser_command || newTurn?.planned_action;
-					if (!newPlanned) {
-						setMessages((prev) => [...prev, { type: "agent", text: `⚠️ No new action suggested during recovery. Stopping.` }]);
-						break;
-					}
-
-					// Enrich with element data if present
-					const newElementData = newTurn.execution_result?.data?.element;
-					if (newElementData && newPlanned.parameters?.element_id === newElementData.element_id) {
-						console.log(`[AGENT-LOOP] Recovery enricher: updating action target`);
-						newPlanned.parameters.xpath = newElementData.xpath;
-						newPlanned.parameters.data_navigator_id = newElementData.attributes['data-navigator-id'];
-					}
-
-					nextAction = normalizeAction(newPlanned);
-					setMessages((prev) => [...prev, { type: "agent", text: `🧭 Recovery attempt ${recoveryAttempt + 1}: ${describeAction(nextAction)}` }]);
-
-				} catch (recoveryError: any) {
-					setMessages((prev) => [...prev, { type: "agent", text: `❌ Recovery failed: ${recoveryError.message}. Stopping.` }]);
-					break;
+				} catch (fbErr: any) {
+					console.warn(`[AGENT-LOOP] Fallback failed:`, fbErr);
 				}
-
-				recoveryAttempt += 1;
 			}
 
-			if (execResult.success !== true) {
-				setMessages((prev) => [...prev, { type: "agent", text: `❌ Action failed after ${recoveryAttempt} recovery attempt(s): ${execResult.message || "unknown error"}` }]);
-				break;
-			}
+			// STEP 5: clear dom with navigator specific elements and wait for page to stabilize
+			await clearDebuggingElements();
+			setMessages((prev) => [...prev, { type: "agent", text: `✅ Step completed. Waiting for page to stabilize...` }]);
+			await waitForPageStabilization(2000);
 
-			if (execResult.success && execResult.message?.includes("Navigation detected during action")) {
-				setMessages((prev) => [...prev, { type: "agent", text: `↪️ Navigation occurred. Assessing new page...` }]);
-			}
-
-			// STEP 5: Wait for page to stabilize
-			setMessages((prev) => [...prev, { type: "agent", text: `✅ Action completed. Waiting for page to stabilize...` }]);
-			await waitForPageStabilization(2000); // Give extra time for page transitions
+			// Prepare iteration result for the next update call
+			lastIterationResult = {
+				iteration_index: iteration,
+				planned_raw: rawPlannedList,
+				planned: normalizedActions,
+				results: batchResults,
+				summary: {
+					any_success: anySuccess,
+					success_count: batchResults.filter(r => r.success).length,
+					failure_count: batchResults.filter(r => !r.success).length,
+					navigation_detected: navigationDetected,
+					fallback_performed: fallbackPerformed,
+				},
+			};
 
 			iteration += 1;
 		}
@@ -286,10 +275,10 @@ async function getCurrentTabsInfo(): Promise<{
 	try {
 		const currentTabs = await chrome.tabs.query({ windowId: chrome.windows.WINDOW_ID_CURRENT });
 		const activeTab = currentTabs.find(t => t.active) || currentTabs[0] || null;
-		const openTabsWithIds = currentTabs.map(tab => 
+		const openTabsWithIds = currentTabs.map(tab =>
 			`Tab id: ${tab.id} - URL: ${tab.url} - Title: ${tab.title}`
 		);
-		
+
 		return { activeTab, openTabsWithIds };
 	} catch (error: any) {
 		console.error("[AGENT-LOOP] Failed to get tab info:", error);
@@ -300,25 +289,25 @@ async function getCurrentTabsInfo(): Promise<{
 async function ensurePageIsReady(setMessages: SetMessages): Promise<void> {
 	const maxWaitTime = 12000; // 12 seconds max
 	const startTime = Date.now();
-	
+
 	console.log(`[AGENT-LOOP] Ensuring page is ready...`);
-	
+
 	while (Date.now() - startTime < maxWaitTime) {
 		try {
 			const { activeTab } = await getCurrentTabsInfo();
 			if (!activeTab?.id) {
 				throw new Error("No active tab found");
 			}
-			
+
 			const tab = await chrome.tabs.get(activeTab.id);
-			
+
 			if (tab && tab.status === "complete" && tab.url && !tab.url.includes("about:blank")) {
 				console.log(`[AGENT-LOOP] Page is ready: ${tab.url}`);
 				// Extra small delay to ensure page is truly stable
 				await new Promise(resolve => setTimeout(resolve, 500));
 				return;
 			}
-			
+
 			console.log(`[AGENT-LOOP] Waiting for page... Status: ${tab?.status}, URL: ${tab?.url}`);
 			await new Promise(resolve => setTimeout(resolve, 200));
 		} catch (error: any) {
@@ -326,7 +315,7 @@ async function ensurePageIsReady(setMessages: SetMessages): Promise<void> {
 			await new Promise(resolve => setTimeout(resolve, 300));
 		}
 	}
-	
+
 	console.warn(`[AGENT-LOOP] Page readiness timeout after ${maxWaitTime}ms, proceeding anyway`);
 }
 
@@ -342,16 +331,16 @@ async function executeActionSafely(
 	for (let attempt = 1; attempt <= maxRetries; attempt++) {
 		try {
 			console.log(`[AGENT-LOOP] Executing action (attempt ${attempt}/${maxRetries}): ${action.type}`);
-			
+
 			// Verify tab still exists
 			const tab = await chrome.tabs.get(tabId);
 			if (!tab || tab.status !== "complete") {
 				throw new Error(`Tab ${tabId} is not ready (status: ${tab?.status})`);
 			}
-			
+
 			const result = await executeAction(tabId, action, action.frame_id);
 			console.log(`[AGENT-LOOP] Action result:`, result);
-			
+
 			if (result.success) {
 				if (result.success && result.message?.includes("Navigation detected during action")) {
 					setMessages((prev) => [...prev, { type: "agent", text: `↪️ Navigation occurred. Assessing new page...` }]);
@@ -364,7 +353,7 @@ async function executeActionSafely(
 			lastError = error;
 			const errorMessage = error.message || String(error);
 			console.warn(`[AGENT-LOOP] Action attempt ${attempt} failed: ${errorMessage}`);
-			
+
 			if (attempt < maxRetries) {
 				setMessages((prev) => [...prev, { type: "agent", text: `⚠️ Retrying action (${errorMessage})...` }]);
 				await new Promise(resolve => setTimeout(resolve, 1000));
@@ -385,34 +374,34 @@ async function waitForPageStabilization(ms: number): Promise<void> {
 
 async function collectDOMDataWithRetry(maxRetries: number = 2): Promise<any> {
 	let lastError: any = null;
-	
+
 	for (let attempt = 1; attempt <= maxRetries; attempt++) {
 		try {
 			console.log(`[AGENT-LOOP] Collecting DOM data attempt ${attempt}/${maxRetries}`);
-			
+
 			// Get current active tab to ensure we're collecting from the right place
 			const { activeTab } = await getCurrentTabsInfo();
 			if (!activeTab?.id) {
 				throw new Error("No active tab available for DOM collection");
 			}
-			
+
 			console.log(`[AGENT-LOOP] Collecting DOM from tab ${activeTab.id}: ${activeTab.url}`);
-			
+
 			const domData = await collectDOMData();
 			console.log(`[AGENT-LOOP] DOM collection successful`);
-			
+
 			return domData;
 		} catch (error: any) {
 			lastError = error;
 			console.warn(`[AGENT-LOOP] DOM collection attempt ${attempt} failed:`, error);
-			
+
 			if (attempt < maxRetries) {
 				console.log(`[AGENT-LOOP] Retrying DOM collection in ${500 * attempt}ms...`);
 				await new Promise(resolve => setTimeout(resolve, 500 * attempt));
 			}
 		}
 	}
-	
+
 	console.error(`[AGENT-LOOP] All DOM collection attempts failed:`, lastError);
 	throw lastError;
 }
@@ -467,4 +456,11 @@ function describeTarget(action: any): string {
 
 function truncate(s: string, n: number): string {
 	return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
+
+async function clearDebuggingElements(): Promise<void> {
+	document.querySelectorAll('[data-navigator-id]').forEach(el => {
+		(el as HTMLElement).style.border = '';
+		el.removeAttribute('data-navigator-id');
+	});
 }

@@ -14,8 +14,8 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")  # one of: gemini | openai | groq
 
 if LLM_PROVIDER == "gemini":
-    PLANNER_MODEL = os.getenv("PLANNER_MODEL", "gemini-2.5-flash")
-    COARSE_PLAN_MODEL = os.getenv("COARSE_PLAN_MODEL", "gemini-2.5-flash-lite")  # optional cheaper model for first turn / CoT
+    PLANNER_MODEL = os.getenv("PLANNER_MODEL", "gemini-2.5-pro")
+    COARSE_PLAN_MODEL = os.getenv("COARSE_PLAN_MODEL", "gemini-2.5-flash")  # optional cheaper model for first turn / CoT
 elif LLM_PROVIDER == "openai":
     PLANNER_MODEL = os.getenv("PLANNER_MODEL", "gpt-5")
     COARSE_PLAN_MODEL = os.getenv("COARSE_PLAN_MODEL", "gpt-5-mini")  # optional cheaper model for first turn / CoT

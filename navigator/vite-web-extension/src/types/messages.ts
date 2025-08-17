@@ -56,6 +56,7 @@ export interface UpdateTaskAndGetPlanMessage {
     scratchpad?: string;
     add_todo?: string;
     mark_todo_done_index?: number;
+    iteration_result?: any;
   };
 }
 

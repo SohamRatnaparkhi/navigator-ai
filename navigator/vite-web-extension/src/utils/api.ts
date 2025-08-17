@@ -40,7 +40,7 @@ export async function updateTaskDom(serverUrl: string, payload: DOMUpdate): Prom
   }
 } 
 
-export async function updateTaskAndGetPlan(serverUrl: string, payload: DOMUpdate & { task_id: string }): Promise<any> {
+export async function updateTaskAndGetPlan(serverUrl: string, payload: DOMUpdate & { task_id: string, iteration_result?: any }): Promise<any> {
   const response = await sendMessageToBackground({
     type: "UPDATE_TASK_AND_GET_PLAN",
     payload: {
@@ -53,6 +53,7 @@ export async function updateTaskAndGetPlan(serverUrl: string, payload: DOMUpdate
       scratchpad: (payload as any).scratchpad,
       add_todo: (payload as any).add_todo,
       mark_todo_done_index: (payload as any).mark_todo_done_index,
+      iteration_result: (payload as any).iteration_result,
     }
   });
 

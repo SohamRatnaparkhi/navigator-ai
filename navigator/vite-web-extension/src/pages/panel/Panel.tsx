@@ -25,6 +25,7 @@ export default function Panel() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [messages, setMessages] = useState<Message[]>([])
   const [selectedLlm, setSelectedLlm] = useState(llms[0])
+  const [debugMode, setDebugMode] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -158,6 +159,8 @@ export default function Panel() {
           updateServerUrl={updateServerUrl}
           theme={theme}
           llms={llms}
+          debugMode={debugMode}
+          setDebugMode={setDebugMode}
         />
       )}
     </div>
