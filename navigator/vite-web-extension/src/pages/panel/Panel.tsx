@@ -1,8 +1,6 @@
 import type React from "react"
 import { useState, useEffect, useRef } from "react"
 import Header from "./Header"
-import Tabs from "./Tabs"
-import ModeSelector from "./ModeSelector"
 import ChatMessages from "./ChatMessages"
 import InputArea from "./InputArea"
 import Settings from "./Settings"
@@ -134,12 +132,18 @@ export default function Panel() {
         theme === "dark" ? "bg-gray-900 text-gray-100" : "bg-white text-gray-900"
       }`}
     >
-      <Header theme={theme} toggleTheme={toggleTheme} />
-      <Tabs activeTab={activeTab} setActiveTab={setActiveTab} theme={theme} />
+      <Header
+        theme={theme}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        mode={mode}
+        setMode={setMode}
+        onNewChat={handleNewAgent}
+      />
 
       {activeTab === "main" ? (
         <>
-          <ModeSelector mode={mode} setMode={setMode} handleNewAgent={handleNewAgent} theme={theme} />
+          {/* Mode selector moved into header; keep spacing tight above chat */}
           <ChatMessages messages={messages} isProcessing={isProcessing} mode={mode} theme={theme} />
           <InputArea
             query={query}
@@ -158,6 +162,7 @@ export default function Panel() {
           serverUrl={serverUrl}
           updateServerUrl={updateServerUrl}
           theme={theme}
+          toggleTheme={toggleTheme}
           llms={llms}
           debugMode={debugMode}
           setDebugMode={setDebugMode}

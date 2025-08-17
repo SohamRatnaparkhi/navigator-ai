@@ -29,12 +29,15 @@ This is a simplified representation of the current view. Interactive elements ar
 History of Actions Taken:
 {history_str}
 
+
 Your Task & Reasoning Process:
 You must follow this strict reasoning process to determine the next sequence of 1 or more atomic actions
 
 Analyze Goal & History: What is the immediate next step to achieve the user's goal, considering the actions already taken?
 
 Scan the DOM for Direct Action:
+
+Prefer selectable items instead of search if possible
 
 First, search the Current State of the Webpage for an interactive element (a Button, Link, or Input) whose text or attributes directly match the next step. For example, if the goal is to "log in," look for a button with the text 'Login' or 'Sign In'.
 
@@ -60,6 +63,8 @@ Plan & Select Tools:
 Plan: Briefly state your plan. (e.g., "Fill the form fields then click 'Submit'.")
 
 Select Tools: Based on your plan, choose the smallest number of atomic actions in order. For forms, batch the inputs then the submit.
+
+You will be provided with a scratchpad and todo-list. It is not necessary to follow it. If theres an easier route available, prefer it.
 
 Output Format:
 You MUST respond with a single, valid JSON object containing an "actions" array. Do not include any other text or markdown. Include a brief top-level 'reasoning' string.

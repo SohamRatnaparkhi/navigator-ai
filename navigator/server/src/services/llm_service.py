@@ -369,8 +369,8 @@ async def plan_next_actions(prompt: str) -> PlannedActionSequence:
             if client is None:
                 raise RuntimeError("OpenAI client not configured")
             messages = [
-                {"role": "system", "content": "You must respond with ONLY valid JSON."},
-                {"role": "user", "content": prompt},
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": "You must respond with ONLY valid JSON."}
             ]
             args = build_openai_chat_args(
                 model=model_name,
@@ -397,8 +397,8 @@ async def plan_next_actions(prompt: str) -> PlannedActionSequence:
             if client is None:
                 raise RuntimeError("Groq client not configured")
             messages = [
-                {"role": "system", "content": "You must respond with ONLY valid JSON."},
-                {"role": "user", "content": prompt},
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": "You must respond with ONLY valid JSON."}
             ]
             args = build_groq_chat_args(
                 model=model_name,
@@ -512,8 +512,8 @@ async def update_scratchpad_via_llm(context: str, current_scratchpad: str) -> Sc
         elif provider == "openai":
             client = get_openai_client()
             messages = [
-                {"role": "system", "content": "JSON only."},
-                {"role": "user", "content": prompt},
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": "JSON only."}
             ]
             args = build_openai_chat_args(
                 model=model_name,
@@ -534,8 +534,8 @@ async def update_scratchpad_via_llm(context: str, current_scratchpad: str) -> Sc
         else:  # groq
             client = get_groq_client()
             messages = [
-                {"role": "system", "content": "JSON only."},
-                {"role": "user", "content": prompt},
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": "JSON only."}
             ]
             args = build_groq_chat_args(
                 model=model_name,
@@ -604,8 +604,8 @@ async def update_todos_via_llm(context: str, current_todos: list[dict]) -> TodoC
         elif provider == "openai":
             client = get_openai_client()
             messages = [
-                {"role": "system", "content": "JSON only."},
-                {"role": "user", "content": prompt},
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": "JSON only."}
             ]
             args = build_openai_chat_args(
                 model=model_name,
@@ -625,8 +625,8 @@ async def update_todos_via_llm(context: str, current_todos: list[dict]) -> TodoC
         else:
             client = get_groq_client()
             messages = [
-                {"role": "system", "content": "JSON only."},
-                {"role": "user", "content": prompt},
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": "JSON only."}
             ]
             args = build_groq_chat_args(
                 model=model_name,

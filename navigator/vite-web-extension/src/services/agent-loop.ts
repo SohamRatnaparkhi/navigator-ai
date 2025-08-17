@@ -17,6 +17,13 @@ interface PlannedActionResponse {
 		action: string;
 		parameters?: any;
 	}>;
+	planned_actions_elements?: Array<{
+		index: number;
+		element_id: number;
+		tag?: string;
+		xpath?: string;
+		attributes?: Record<string, any>;
+	}>;
 	execution_result?: {
 		status: "success" | "error";
 		message?: string;
@@ -164,12 +171,35 @@ export async function runAgentLoop(
 				break;
 			}
 
-			// Enrich first planned action with element data if available
-			const fullElementData = turn.execution_result?.data?.element;
-			if (fullElementData && rawPlannedList[0]?.parameters?.element_id === fullElementData.element_id) {
-				console.log(`[AGENT-LOOP] Enriching first action with element data for iteration ${iteration}`);
-				rawPlannedList[0].parameters.xpath = fullElementData.xpath;
-				rawPlannedList[0].parameters.data_navigator_id = fullElementData.attributes['data-navigator-id'];
+			// Enrich planned actions with element details from server (by index or element_id)
+			try {
+				const plannedElements = Array.isArray((turn as any).planned_actions_elements) ? (turn as any).planned_actions_elements as any[] : [];
+				const byIndex = new Map<number, any>();
+				const byElementId = new Map<number, any>();
+				for (const el of plannedElements) {
+					if (typeof el?.index === 'number') byIndex.set(el.index, el);
+					if (typeof el?.element_id === 'number') byElementId.set(el.element_id, el);
+				}
+				for (let i = 0; i < rawPlannedList.length; i++) {
+					const pl = rawPlannedList[i] || {};
+					pl.parameters = pl.parameters || {};
+					const elIdx = byIndex.get(i);
+					const elById = byElementId.get(pl.parameters.element_id);
+					const el = elIdx || elById;
+					if (el) {
+						if (el.xpath && !pl.parameters.xpath) pl.parameters.xpath = el.xpath;
+						const navId = el.attributes?.['data-navigator-id'];
+						if (navId && !pl.parameters.data_navigator_id) pl.parameters.data_navigator_id = navId;
+					}
+				}
+				// Also keep backward compat enrichment for first action if provided separately
+				const fullElementData = turn.execution_result?.data?.element;
+				if (fullElementData && rawPlannedList[0]?.parameters?.element_id === fullElementData.element_id) {
+					rawPlannedList[0].parameters.xpath = rawPlannedList[0].parameters.xpath || fullElementData.xpath;
+					rawPlannedList[0].parameters.data_navigator_id = rawPlannedList[0].parameters.data_navigator_id || fullElementData.attributes['data-navigator-id'];
+				}
+			} catch (e) {
+				console.warn('[AGENT-LOOP] Failed enriching planned actions with element details', e);
 			}
 
 			const normalizedActions = rawPlannedList.map(pl => normalizeAction(pl));

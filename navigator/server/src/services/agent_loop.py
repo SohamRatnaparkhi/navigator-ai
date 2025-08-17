@@ -529,6 +529,25 @@ async def run_agent_loop(task_id: str, dom_data: FullDOMData, iteration_result: 
         "planned_actions": [a.model_dump() for a in (planned_seq.actions or [])],
         "execution_result": exec_result.model_dump(),
     }
+    # Attach element details for each planned action that references an element_id
+    try:
+        planned_elements: List[Dict[str, Any]] = []
+        for idx, act in enumerate(planned_seq.actions or []):
+            params = getattr(act, "parameters", {}) or {}
+            el_id = params.get("element_id")
+            if isinstance(el_id, int) and el_id in element_map:
+                details = element_map.get(el_id) or {}
+                planned_elements.append({
+                    "index": idx,
+                    "element_id": el_id,
+                    "tag": details.get("tag"),
+                    "xpath": details.get("xpath"),
+                    "attributes": details.get("attributes", {}),
+                })
+        if planned_elements:
+            out["planned_actions_elements"] = planned_elements
+    except Exception:
+        logger.exception("Failed attaching planned action element details")
     # Include token usage and provider/model info for memory updates
     try:
         if 'sp_update' in locals() and sp_update:

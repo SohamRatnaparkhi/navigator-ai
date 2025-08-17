@@ -11,7 +11,7 @@ interface ModeSelectorProps {
 export default function ModeSelector({ mode, setMode, handleNewAgent, theme }: ModeSelectorProps) {
   return (
     <div
-      className={`flex items-center justify-between px-6 py-4 border-b ${
+      className={`flex items-center justify-between px-4 py-2 border-b ${
         theme === "dark" ? "border-gray-700" : "border-gray-200"
       }`}
     >
@@ -22,7 +22,7 @@ export default function ModeSelector({ mode, setMode, handleNewAgent, theme }: M
       >
         <button
           onClick={() => setMode("agent")}
-          className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 flex items-center space-x-2 ${
+          className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 flex items-center space-x-2 ${
             mode === "agent"
               ? "bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-white"
               : "text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
@@ -33,7 +33,7 @@ export default function ModeSelector({ mode, setMode, handleNewAgent, theme }: M
         </button>
         <button
           onClick={() => setMode("ask")}
-          className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 ${
+          className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${
             mode === "ask"
               ? "bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-white"
               : "text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
@@ -46,7 +46,7 @@ export default function ModeSelector({ mode, setMode, handleNewAgent, theme }: M
       {mode === "agent" && (
         <button
           onClick={handleNewAgent}
-          className={`px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center space-x-2 ${
+          className={`px-2.5 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 flex items-center space-x-2 ${
             theme === "dark"
               ? "bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-700"
               : "bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-200"

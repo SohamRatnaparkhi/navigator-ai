@@ -18,8 +18,19 @@ export default function ChatMessages({ messages, isProcessing, mode, theme }: Ch
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const clampLongTokens = (text?: string, tokenLimit = 160) => {
+    if (!text) return "";
+    return text
+      .split(/(\s+)/) // keep whitespace separators
+      .map((segment) => {
+        if (/^\s+$/.test(segment)) return segment;
+        return segment.length > tokenLimit ? segment.slice(0, tokenLimit) + "…" : segment;
+      })
+      .join("");
+  };
+
   return (
-    <main className="flex-1 overflow-y-auto p-6 space-y-4">
+    <main className="flex-1 overflow-y-auto overflow-x-hidden p-6 space-y-4 nai-scroll">
       {messages.length === 0 && (
         <div className="flex flex-col items-center justify-center h-full text-center space-y-4">
           <div
@@ -31,7 +42,7 @@ export default function ChatMessages({ messages, isProcessing, mode, theme }: Ch
           </div>
           <div>
             <h3 className={`text-lg font-semibold ${theme === "dark" ? "text-gray-200" : "text-gray-800"}`}>
-              Welcome to Navigator AI
+              Welcome to NAI
             </h3>
             <p className={`text-sm mt-1 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
               {mode === "agent"
@@ -56,7 +67,7 @@ export default function ChatMessages({ messages, isProcessing, mode, theme }: Ch
                     : "bg-gray-100 text-gray-800 border border-gray-200"
               }`}
             >
-              <p className="text-sm leading-relaxed">{msg.text}</p>
+              <p className="text-sm leading-relaxed break-words break-all whitespace-pre-wrap overflow-x-hidden">{clampLongTokens((msg as any).text)}</p>
             </div>
           )}
         </div>

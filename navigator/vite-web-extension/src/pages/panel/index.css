@@ -1,0 +1,25 @@
+
+/* Thin vertical scrollbar, dark themed */
+.nai-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.nai-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.nai-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(0,0,0,0.5);
+  border-radius: 8px;
+}
+
+.nai-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0,0,0,0.6) transparent; /* Firefox */
+}
+
+/* Prevent horizontal scrollbar globally inside panel */
+html, body, #__root {
+  overflow-x: hidden;
+}

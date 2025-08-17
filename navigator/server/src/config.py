@@ -20,6 +20,6 @@ elif LLM_PROVIDER == "openai":
     PLANNER_MODEL = os.getenv("PLANNER_MODEL", "gpt-5")
     COARSE_PLAN_MODEL = os.getenv("COARSE_PLAN_MODEL", "gpt-5-mini")  # optional cheaper model for first turn / CoT
 elif LLM_PROVIDER == "groq":
-    PLANNER_MODEL = os.getenv("PLANNER_MODEL", "moonshotai/kimi-k2-instruct")
+    PLANNER_MODEL = os.getenv("PLANNER_MODEL", "openai/gpt-oss-120b")
     # optional cheaper model for first turn / CoT
-    COARSE_PLAN_MODEL = os.getenv("COARSE_PLAN_MODEL", "openai/gpt-oss-120b")
+    COARSE_PLAN_MODEL = os.getenv("COARSE_PLAN_MODEL", "openai/gpt-oss-20b")

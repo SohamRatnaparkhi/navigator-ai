@@ -8,6 +8,7 @@ interface SettingsProps {
   serverUrl: string;
   updateServerUrl: (url: string) => void;
   theme: string;
+  toggleTheme: () => void;
   llms: { id: number; name: string; unavailable: boolean }[];
   debugMode: boolean;
   setDebugMode: (debugMode: boolean) => void;
@@ -19,6 +20,7 @@ export default function Settings({
   serverUrl,
   updateServerUrl,
   theme,
+  toggleTheme,
   llms,
   debugMode,
   setDebugMode,
@@ -26,6 +28,20 @@ export default function Settings({
   return (
     <div className="flex-1 p-6 space-y-8">
       <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h3 className={`text-lg font-semibold ${theme === "dark" ? "text-gray-200" : "text-gray-800"}`}>Appearance</h3>
+          <button
+            onClick={toggleTheme}
+            className={`px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+              theme === "dark"
+                ? "bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-700"
+                : "bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-200"
+            }`}
+          >
+            Toggle {theme === "dark" ? "Light" : "Dark"}
+          </button>
+        </div>
+
         <div>
           <h3 className={`text-lg font-semibold mb-4 ${theme === "dark" ? "text-gray-200" : "text-gray-800"}`}>
             AI Model Configuration
