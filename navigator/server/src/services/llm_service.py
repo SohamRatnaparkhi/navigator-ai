@@ -482,6 +482,7 @@ async def plan_next_actions(prompt: str) -> PlannedActionSequence:
 
 async def update_scratchpad_via_llm(context: str, current_scratchpad: str) -> ScratchpadUpdate:
     """Ask a small LLM to update the scratchpad only, returning structured mode+text."""
+    return ""
     provider = (LLM_PROVIDER or "gemini").lower()
     model_name = COARSE_PLAN_MODEL
     prompt = get_scratchpad_update_prompt(context, current_scratchpad)
@@ -579,6 +580,7 @@ async def update_scratchpad_via_llm(context: str, current_scratchpad: str) -> Sc
 
 async def update_todos_via_llm(context: str, current_todos: list[dict]) -> TodoChanges:
     """Ask a small LLM to update the todo list only (adds and marks-done)."""
+    return ""
     provider = (LLM_PROVIDER or "gemini").lower()
     model_name = COARSE_PLAN_MODEL
     prompt = get_todo_update_prompt(context, current_todos)

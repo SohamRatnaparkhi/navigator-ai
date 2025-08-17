@@ -115,6 +115,12 @@ if (!window.navigatorAgent) {
 						}
 						inputEl.dispatchEvent(new Event('change', { bubbles: true }));
 
+						if (inputEl.value !== action.text) {
+							inputEl.value = action.text;
+							inputEl.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true }));
+							inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+						}
+
 						// await wait(200); 
 						// const parentForm = targetElement.closest('form');
 						// if (parentForm) {

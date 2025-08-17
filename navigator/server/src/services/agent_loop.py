@@ -338,7 +338,8 @@ async def _plan_next_action(
             optimized_dom=batches[0],
             user_query=user_goal or "",
             action_history=action_history[-15:],
-        ) + f"\n\n{formatted_iteration_results} \n\nScratchpad:\n{scratchpad or ''}\n\nTodo List:\n{json.dumps(todo_list, ensure_ascii=False)}\n\nReturn ONLY JSON."
+        ) + f"\n\n{formatted_iteration_results}"
+        #   \n\nScratchpad:\n{scratchpad or ''}\n\nTodo List:\n{json.dumps(todo_list, ensure_ascii=False)}\n\nReturn ONLY JSON."
         
         return await plan_next_actions(prompt), 0
     
